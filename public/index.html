@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/styles.css?v=1">
+</head>
+<body>
+<div class="auth-wrap">
+  <div class="card auth-card">
+    <div id="lockup"></div>
+    <h1 style="margin-bottom:6px">Sign in</h1>
+    <p class="muted" style="margin-bottom:18px">Transaction-monitoring alert triage and compliance officer review.</p>
+    <form id="login" novalidate>
+      <label class="field">Username<input name="username" autocomplete="username" required autofocus></label>
+      <label class="field">Password<input name="password" type="password" autocomplete="current-password" required></label>
+      <div class="err-text" id="err" role="alert" hidden></div>
+      <button class="btn btn-primary" type="submit" id="go">Sign in</button>
+    </form>
+  </div>
+</div>
+<script src="/common.js?v=1"></script>
+<script>
+(function () {
+  var next = new URLSearchParams(location.search).get('next') || '/dashboard.html';
+  if (!/^\/[a-z0-9._\-\/?=&%]*$/i.test(next) || next.indexOf('//') === 0) next = '/dashboard.html';
+  UI.api('GET', '/api/me').then(function () { location.replace(next); }).catch(function () {});
+  UI.api('GET', '/api/config').then(function (c) {
+    document.title = 'Sign in · ' + c.appName;
+    document.getElementById('lockup').innerHTML = UI.lockup(c);
+  }).catch(function () {});
+  var f = document.getElementById('login');
+  f.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var err = document.getElementById('err'); err.hidden = true;
+    if (!f.username.value.trim() || !f.password.value) { err.textContent = 'Enter your username and password.'; err.hidden = false; return; }
+    var b = document.getElementById('go'); b.disabled = true; b.innerHTML = '<span class="spin"></span> Signing in';
+    UI.api('POST', '/api/login', { username: f.username.value, password: f.password.value })
+      .then(function () { location.replace(next); })
+      .catch(function (x) { err.textContent = x.message; err.hidden = false; b.disabled = false; b.textContent = 'Sign in'; });
+  });
+})();
+</script>
+</body>
+</html>

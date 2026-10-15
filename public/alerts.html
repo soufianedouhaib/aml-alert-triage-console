@@ -1,1 +1,28 @@
-
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alerts</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/styles.css?v=1">
+</head>
+<body>
+<div id="root" class="boot"></div>
+<template id="tpl">
+  <div class="page-head">
+    <div><h1>Alerts</h1><div class="sub">Every submitted alert, its risk score and where it was routed.</div></div>
+    <div class="row" id="actions"></div>
+  </div>
+  <section class="card">
+    <div class="card-head">
+      <div class="toolbar" id="filters" role="group" aria-label="Filter"></div>
+      <input type="search" id="q" placeholder="Search alert, customer, account" aria-label="Search" style="min-width:240px">
+    </div>
+    <div id="list"><div class="skeleton">Loading…</div></div>
+  </section>
+</template>
+<script src="/common.js?v=1"></script>
+<script src="/alerts.js?v=1"></script>
+</body>
+</html>

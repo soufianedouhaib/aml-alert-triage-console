@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Users</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/styles.css?v=1">
+</head>
+<body>
+<div id="root" class="boot"></div>
+<template id="tpl">
+  <div class="page-head">
+    <div><h1>Users</h1><div class="sub">Who can sign in and what they can do.</div></div>
+    <button class="btn btn-primary" id="add">Add user</button>
+  </div>
+  <section class="card" style="margin-bottom:16px">
+    <div id="list"><div class="skeleton">Loading…</div></div>
+  </section>
+  <section class="card card-pad">
+    <h2 style="margin-bottom:8px">Roles</h2>
+    <dl class="kv">
+      <dt>L1 Analyst</dt><dd>Submits alerts and follows their progress and outcomes.</dd>
+      <dt>Compliance Officer</dt><dd>Decides alerts in the review queue: confirm, override or annotate. Needs an officer ID, which is written into the audit trail.</dd>
+      <dt>Administrator</dt><dd>Everything above, plus users, deleting cases and the <a href="/system.html">system page</a>.</dd>
+    </dl>
+  </section>
+</template>
+<script src="/common.js?v=1"></script>
+<script src="/users.js?v=1"></script>
+</body>
+</html>
