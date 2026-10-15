@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sign in</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="/styles.css?v=1">
+<link rel="stylesheet" href="/styles.css?v=2">
 </head>
 <body>
 <div class="auth-wrap">
@@ -19,9 +19,10 @@
       <div class="err-text" id="err" role="alert" hidden></div>
       <button class="btn btn-primary" type="submit" id="go">Sign in</button>
     </form>
+    <p class="small faint" id="trouble" style="margin:16px 0 0" hidden>Trouble signing in? <a id="trouble-link" href="#">Contact Opus</a></p>
   </div>
 </div>
-<script src="/common.js?v=1"></script>
+<script src="/common.js?v=2"></script>
 <script>
 (function () {
   var next = new URLSearchParams(location.search).get('next') || '/dashboard.html';
@@ -30,6 +31,10 @@
   UI.api('GET', '/api/config').then(function (c) {
     document.title = 'Sign in · ' + c.appName;
     document.getElementById('lockup').innerHTML = UI.lockup(c);
+    if (c.supportEmail) {
+      document.getElementById('trouble-link').href = 'mailto:' + c.supportEmail + '?subject=' + encodeURIComponent('[' + c.appName + '] Sign-in or account') + '&body=' + encodeURIComponent('Username: \nWhat happened: \n\n---\nPage: ' + location.href + '\nTime (UTC): ' + new Date().toISOString());
+      document.getElementById('trouble').hidden = false;
+    }
   }).catch(function () {});
   var f = document.getElementById('login');
   f.addEventListener('submit', function (e) {

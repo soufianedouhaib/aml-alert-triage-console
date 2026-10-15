@@ -12,6 +12,7 @@
     help: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 015 .5c0 1.7-2.5 2-2.5 3.5"/><circle cx="12" cy="17" r=".6" fill="currentColor"/></svg>',
     key: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3"/></svg>',
     moon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 14.5A8 8 0 019.5 4a8 8 0 1010.5 10.5z"/></svg>',
+    mail: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>',
     out: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4h4v16h-4"/><path d="M10 8l-4 4 4 4M6 12h10"/></svg>',
     menu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>',
     check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"/></svg>',
@@ -216,6 +217,7 @@
       '<nav class="nav" aria-label="Main">' + nav + '</nav>' +
       '<div class="side-foot">' +
       '<div class="whoami"><b>' + esc(u.name) + '</b>' + esc(u.roleLabel) + (u.officerId ? ' · ' + esc(u.officerId) : '') + '</div>' +
+      '<button class="side-btn" id="btn-contact">' + ICONS.mail + 'Contact Opus</button>' +
       '<button class="side-btn" id="btn-help">' + ICONS.help + 'Help</button>' +
       '<button class="side-btn" id="btn-theme">' + ICONS.moon + 'Theme</button>' +
       '<button class="side-btn" id="btn-pw">' + ICONS.key + 'Change password</button>' +
@@ -228,6 +230,7 @@
     $('#btn-out').onclick = function () { api('POST', '/api/logout', {}).then(function () { location.href = '/'; }); };
     $('#btn-theme').onclick = cycleTheme;
     $('#btn-help').onclick = function () { showHelp(me); };
+    $('#btn-contact').onclick = function () { contactSupport(); };
     $('#btn-pw').onclick = changePassword;
     $('#btn-menu').onclick = function (e) { e.stopPropagation(); root.classList.toggle('nav-open'); };
     root.addEventListener('click', function (e) { if (root.classList.contains('nav-open') && !$('#side').contains(e.target)) root.classList.remove('nav-open'); });
@@ -242,9 +245,61 @@
     }).catch(function () {});
   }
 
+  // Contact Opus: a short form that opens a pre-filled email. The IDs support
+  // needs (case, workflow, user, page) go into the email only, not the dialog.
+  var TOPICS = ['Something is not working', 'Question about an alert or decision', 'Sign-in or account', 'Other'];
+  function contactSupport(ctx) {
+    ctx = ctx || state.caseCtx || {};
+    var me = state.me || {};
+    var u = me.user || {};
+    var d = dialog('<form id="cf"><div class="dlg-head"><h2>Contact Opus</h2><button type="button" class="x" data-close aria-label="Close">×</button></div><div class="dlg-body">' +
+      '<p class="muted" style="margin:0">Tell us what happened. Your email app opens with the message and the details support needs to find your case.</p>' +
+      '<label class="field">Topic<select name="topic">' + TOPICS.map(function (t) { return '<option>' + esc(t) + '</option>'; }).join('') + '</select></label>' +
+      (ctx.alertId ? '<div class="callout info small">About alert <b>' + esc(ctx.alertId) + '</b></div>' : '') +
+      '<label class="field">Message<span class="help">What you did, what you expected and what you saw.</span><textarea name="message" rows="5" maxlength="1500"></textarea></label>' +
+      '<div class="err-text" id="cf-err" hidden></div>' +
+      (me.supportEmail ? '' : '<div class="callout warn small">No support address is set up yet. Copy the details and send them to your Opus contact, or ask your administrator to set SUPPORT_EMAIL.</div>') +
+      '</div><div class="dlg-foot"><button type="button" class="btn" id="cf-copy">Copy details</button>' + (me.supportEmail ? '<button class="btn btn-primary" type="submit">' + ICONS.mail + 'Open email</button>' : '') + '</div></form>');
+    var f = $('#cf', d);
+    f.message.addEventListener('input', function () { $('#cf-err', d).hidden = true; });
+    function details() {
+      var lines = [
+        f.message.value.trim(), '', '---',
+        'Topic: ' + f.topic.value,
+        'App: ' + (me.appName || ''),
+        'Page: ' + location.href,
+        'User: ' + (u.name || '') + ' (' + (u.username || '') + ', ' + (u.roleLabel || '') + (u.officerId ? ', ' + u.officerId : '') + ')'
+      ];
+      if (ctx.alertId) lines.push('Alert ID: ' + ctx.alertId);
+      if (ctx.caseId) lines.push('Case ID: ' + ctx.caseId);
+      if (ctx.stage) lines.push('Status: ' + ctx.stage);
+      if (me.workflowId) lines.push('Workflow ID: ' + me.workflowId);
+      lines.push('Time (UTC): ' + new Date().toISOString());
+      lines.push('Browser: ' + navigator.userAgent);
+      return lines.join('\n');
+    }
+    function valid() {
+      var e = $('#cf-err', d);
+      if (f.message.value.trim().length < 5) { e.textContent = 'Write a short message first.'; e.hidden = false; return false; }
+      e.hidden = true; return true;
+    }
+    $('#cf-copy', d).onclick = function () {
+      if (!valid()) return;
+      var text = 'Subject: ' + subject() + '\n\n' + details();
+      try { navigator.clipboard.writeText(text).then(function () { toast('Details copied'); }, function () { toast('Copy failed — select and copy manually', true); }); } catch (e) { toast('Copy failed', true); }
+    };
+    function subject() { return '[' + (me.appName || 'AML') + '] ' + f.topic.value + (ctx.alertId ? ' — ' + ctx.alertId : ''); }
+    f.addEventListener('submit', function (e) {
+      e.preventDefault();
+      if (!valid()) return;
+      location.href = 'mailto:' + encodeURIComponent(me.supportEmail).replace(/%40/g, '@') + '?subject=' + encodeURIComponent(subject()) + '&body=' + encodeURIComponent(details());
+      setTimeout(function () { d.close(); toast('Email opened in your mail app'); }, 300);
+    });
+  }
+
   function showHelp(me) {
     var contact = me.supportEmail
-      ? '<p>Still stuck? Email <a href="mailto:' + esc(me.supportEmail) + '?subject=' + encodeURIComponent(me.appName + ' help') + '">' + esc(me.supportEmail) + '</a> and include the alert ID.</p>'
+      ? '<p>Still stuck? Use <b>Contact Opus</b> in the menu, or on the alert page so the alert is attached.</p>'
       : '<p class="faint">Ask your administrator if something does not look right, and include the alert ID.</p>';
     dialog('<div class="dlg-head"><h2>Help</h2><button class="x" data-close aria-label="Close">×</button></div><div class="dlg-body">' +
       '<p><b>How an alert moves:</b> intake → evidence lookups → specialist analysis → risk scoring → narrative → officer review → routing.</p>' +
@@ -292,7 +347,7 @@
   window.UI = {
     ICONS: ICONS, esc: esc, $: $, $all: $all, api: api, fmtDate: fmtDate, ago: ago, dur: dur, money: money,
     pill: pill, dispPill: dispPill, casePill: casePill, isOpen: isOpen, scoreBadge: scoreBadge, levelPill: levelPill,
-    riskWord: riskWord, countdown: countdown, toast: toast, dialog: dialog, boot: boot, lockup: lockup,
+    riskWord: riskWord, countdown: countdown, contactSupport: contactSupport, toast: toast, dialog: dialog, boot: boot, lockup: lockup,
     DISP: DISP, QUEUES: QUEUES, ACTIONS: ACTIONS, downloadJson: downloadJson, refreshReviewCount: refreshReviewCount,
     state: state
   };

@@ -55,6 +55,7 @@
     var html = '<div class="page-head"><div><h1>Alert ' + esc(c.alertId) + '</h1><div class="sub">' + UI.casePill(c) +
       (c.duplicateOf ? ' <span class="tag">Repeat of an earlier submission' + (data.duplicateOfAlert ? '' : '') + '</span> <a class="small" href="/case.html?id=' + encodeURIComponent(c.duplicateOf) + '">open earlier case</a>' : '') +
       ' <span class="faint small">· submitted ' + UI.fmtDate(c.createdAt) + ' by ' + esc(c.submittedBy) + '</span></div></div><div class="row">' +
+      '<button class="btn btn-sm" id="btn-contact-case">' + UI.ICONS.mail + 'Contact Opus</button>' +
       '<button class="btn btn-sm" id="btn-refresh">' + UI.ICONS.refresh + 'Refresh</button>' +
       (me.user.role === 'admin' ? '<button class="btn btn-sm btn-danger" id="btn-del">Delete</button>' : '') + '</div></div>';
     html += '<section class="card" style="margin-bottom:16px"><div class="facts">' +
@@ -327,6 +328,8 @@
     UI.$all('.tabs button').forEach(function (b) { b.onclick = function () { tab = b.getAttribute('data-tab'); renderTab(); }; });
     renderTab(); renderSide();
     window.scrollTo(0, keepScroll);
+    UI.state.caseCtx = { alertId: data.case.alertId, caseId: data.case.id, stage: data.case.stage };
+    UI.$('#btn-contact-case').onclick = function () { UI.contactSupport(UI.state.caseCtx); };
     UI.$('#btn-refresh').onclick = function () { UI.api('POST', '/api/cases/' + encodeURIComponent(id) + '/refresh', {}).then(load); };
     var del = UI.$('#btn-del');
     if (del) del.onclick = function () {
