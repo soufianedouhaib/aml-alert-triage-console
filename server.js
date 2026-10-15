@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const store = require('./lib/store');
 const auth = require('./lib/auth');
 const evidence = require('./lib/evidence');
+const report = require('./lib/report');
 const { SAMPLES } = require('./lib/samples');
 
 // ---------------------------------------------------------------------------
@@ -21,25 +22,30 @@ const OFFICER_RESPONSE_VAR = 'workflow_output_feqiebau8'; // Officer Response (s
 const REVIEW_TIMEOUT_MIN = Number(process.env.REVIEW_TIMEOUT_MINUTES || 10);
 const WEBHOOK_HEADER = String(process.env.REVIEW_WEBHOOK_HEADER || 'x-webhook-secret').toLowerCase();
 
-const APP_NAME = process.env.APP_NAME || 'AML Alert Triage';
-const ORG_NAME = process.env.ORG_NAME || 'Financial Crime Compliance';
+const PRODUCT = {
+  name: process.env.APP_NAME || 'AML Alert Triage',
+  unit: process.env.ORG_UNIT || process.env.ORG_NAME || 'Financial Crime Unit',
+  company: process.env.COMPANY_NAME || 'Harbourline Group',
+};
 const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || '';
+const ORG_ID = process.env.OPUS_ORG_ID || '';
 
 const CASES_KEY = 'aml:cases';
 const REVIEWS_KEY = 'aml:reviews';
 const TERMINAL = ['COMPLETED', 'FAILED', 'CANCELLED', 'TIMED_OUT'];
 const DISPOSITIONS = ['ESCALATE', 'REFER', 'CLOSE'];
 const ACTIONS = ['CONFIRM', 'OVERRIDE', 'ANNOTATE'];
+const KEEP_ON_CLEAR = 3;
 
 function serviceKey() { return process.env.OPUS_SERVICE_KEY || process.env.OPUS_API_KEY || ''; }
 
 function missingEnv() {
   const m = [];
   if (!serviceKey()) m.push('OPUS_SERVICE_KEY');
-  if (!process.env.ADMIN_PASSWORD) m.push('ADMIN_PASSWORD');
   if (!process.env.SESSION_SECRET) m.push('SESSION_SECRET');
   if (!process.env.REVIEW_WEBHOOK_SECRET) m.push('REVIEW_WEBHOOK_SECRET');
-  if (!SUPPORT_EMAIL) m.push('SUPPORT_EMAIL (where Contact Opus sends messages)');
+  if (!SUPPORT_EMAIL) m.push('SUPPORT_EMAIL (where "Report a problem" emails go)');
+  if (!auth.demoEnabled() && !process.env.ADMIN_PASSWORD) m.push('ADMIN_PASSWORD (needed when DEMO_MODE=false)');
   if (!store.persistent()) m.push('Redis storage (KV_REST_API_URL + KV_REST_API_TOKEN, or REDIS_URL)');
   return m;
 }
@@ -83,18 +89,28 @@ const saveReview = (r) => store.hset(REVIEWS_KEY, r.id, r);
 
 async function allCases() {
   const all = await store.hgetall(CASES_KEY);
-  return Object.values(all).filter((c) => !c.deleted).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  return Object.values(all).filter((c) => c && !c.deleted).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
 }
 async function allReviews() {
   const all = await store.hgetall(REVIEWS_KEY);
-  return Object.values(all).filter((r) => !r.deleted).sort((a, b) => String(b.receivedAt).localeCompare(String(a.receivedAt)));
+  return Object.values(all).filter((r) => r && !r.deleted).sort((a, b) => String(b.receivedAt).localeCompare(String(a.receivedAt)));
 }
+
+// Analysts see the alerts they submitted; officers and admins see every alert.
+function canSee(user, c) {
+  if (!user || !c) return false;
+  if (user.role !== 'analyst') return true;
+  return c.submittedBy === user.email;
+}
+async function casesFor(user) { return (await allCases()).filter((c) => canSee(user, c)); }
 
 function reviewState(r) {
   if (!r) return null;
   if (r.status === 'PENDING' && r.deadline && Date.parse(r.deadline) < Date.now()) return 'EXPIRED';
   return r.status;
 }
+
+function submitterName(c) { return c.submittedByName || c.submittedBy || ''; }
 
 // Single projection used by every list, so every screen agrees.
 function toRow(c, review) {
@@ -107,18 +123,24 @@ function toRow(c, review) {
   if (review && reviewState(review) === 'DECIDED' && !TERMINAL.includes(c.opusStatus)) stage = 'FINALISING';
   if (TERMINAL.includes(c.opusStatus)) stage = c.opusStatus;
   if (c.opusStatus === 'COMPLETED' && !res.final_disposition) stage = 'COMPLETED_NO_RESULT';
+  const decision = (review && review.decision) || c.decision || null;
+  const finishedAt = c.finishedAt || null;
   return {
     id: c.id,
     alertId: c.alertId,
     customerId: c.customerId || '',
     customerName: c.customerName || '',
+    kycRisk: c.kycRisk || '',
     account: c.account || '',
     rule: c.rule || '',
     alertScore: c.alertScore,
     priority: c.priority || '',
+    note: c.note || '',
     createdAt: c.createdAt,
     updatedAt: c.updatedAt,
-    submittedBy: c.submittedByName || c.submittedBy,
+    finishedAt,
+    durationMs: finishedAt ? Math.max(0, Date.parse(finishedAt) - Date.parse(c.createdAt)) : null,
+    submittedBy: submitterName(c),
     submittedByUser: c.submittedBy,
     opusStatus: c.opusStatus || 'PENDING',
     stage,
@@ -127,10 +149,14 @@ function toRow(c, review) {
     finalDisposition: res.final_disposition || '',
     queue: routing.queue || '',
     slaHours: routing.sla_hours != null ? routing.sla_hours : null,
-    officerAction: rec.officer_action || (c.decision && c.decision.action) || '',
-    officerId: rec.officer_id || (c.decision && c.decision.officerId) || '',
+    officerAction: rec.officer_action || (decision && decision.action) || '',
+    officerId: rec.officer_id || (decision && decision.officerId) || '',
+    officerName: (decision && decision.byName) || '',
+    decisionAt: (decision && decision.at) || '',
+    decisionText: (decision && decision.responseText) || '',
     reviewId: review ? review.id : '',
     reviewState: review ? reviewState(review) : '',
+    reviewReceivedAt: review ? review.receivedAt : '',
     reviewDeadline: review ? review.deadline : '',
     duplicateOf: c.duplicateOf || '',
     error: c.error || '',
@@ -138,8 +164,17 @@ function toRow(c, review) {
 }
 
 function reviewForCase(c, reviews) {
-  const linked = reviews.filter((r) => r.linkedCaseId === c.id);
-  return linked.sort((a, b) => String(b.receivedAt).localeCompare(String(a.receivedAt)))[0] || null;
+  return reviews.filter((r) => r.linkedCaseId === c.id).sort((a, b) => String(b.receivedAt).localeCompare(String(a.receivedAt)))[0] || null;
+}
+
+async function rowsFor(user, refreshLive) {
+  const cases = await casesFor(user);
+  const reviews = await allReviews();
+  if (refreshLive) {
+    const live = cases.filter((c) => !TERMINAL.includes(c.opusStatus) || (c.opusStatus === 'COMPLETED' && !c.result)).slice(0, 6);
+    await Promise.all(live.map((c) => refreshCase(c).catch(() => c)));
+  }
+  return cases.map((c) => toRow(c, reviewForCase(c, reviews)));
 }
 
 // ---------------------------------------------------------------------------
@@ -195,22 +230,31 @@ async function getEvidence(c) {
     ev = evidence.build(null, c.opusStatus);
     ev.error = e.message;
   }
-  // Remember headline numbers on the case so lists can show them.
+  // Remember headline numbers on the case so lists and reports can show them.
   const nar = ev.data.narrative && typeof ev.data.narrative === 'object' ? ev.data.narrative : null;
   const man = ev.data.manifest && typeof ev.data.manifest === 'object' ? ev.data.manifest : null;
+  const cd = ev.data.customerData && typeof ev.data.customerData === 'object' ? ev.data.customerData : null;
   let dirty = false;
   const rec = (man && man.case_header && man.case_header.recommended_disposition) || (nar && nar.disposition && nar.disposition.recommendation);
   const score = (man && man.case_header && man.case_header.risk_score) != null ? man.case_header.risk_score : (nar ? nar.blended_risk_score : null);
-  const cname = (man && man.customer_name) || (nar && nar.customer_name);
+  const cname = (man && man.customer_name) || (nar && nar.customer_name) || (cd && cd.customer_profile && cd.customer_profile.full_name);
   const cid = (man && man.customer_id) || (nar && nar.customer_id) || (ev.data.parsedAlert && ev.data.parsedAlert.customer_id);
+  const kyc = cd && cd.customer_profile && cd.customer_profile.risk_rating;
   if (rec && DISPOSITIONS.includes(rec) && c.recommended !== rec) { c.recommended = rec; dirty = true; }
   if (score != null && !isNaN(Number(score)) && c.riskScore !== Number(score)) { c.riskScore = Number(score); dirty = true; }
   if (cname && c.customerName !== cname) { c.customerName = cname; dirty = true; }
   if (cid && c.customerId !== cid) { c.customerId = cid; dirty = true; }
+  if (kyc && c.kycRisk !== kyc) { c.kycRisk = String(kyc); dirty = true; }
   if (dirty) await saveCase(c);
   evCache.set(c.id, { at: Date.now(), status: c.opusStatus, ev });
   if (TERMINAL.includes(c.opusStatus) && ev.hasAudit) await store.set(key, ev);
   return ev;
+}
+
+async function deleteCaseAndReviews(c, reviews) {
+  await store.hdel(CASES_KEY, c.id);
+  await store.del('aml:evidence:' + c.id);
+  for (const r of reviews.filter((x) => x.linkedCaseId === c.id)) await store.hdel(REVIEWS_KEY, r.id);
 }
 
 // ---------------------------------------------------------------------------
@@ -235,46 +279,80 @@ const adminOnly = auth.requireRole('admin');
 
 app.get('/api/health', wrap(async (req, res) => {
   const missing = missingEnv();
-  const out = { ok: missing.length === 0, app: APP_NAME };
+  const out = { ok: missing.length === 0 };
   if (req.user && req.user.role === 'admin') out.missing = missing;
   res.json(out);
 }));
 
 app.get('/api/config', (req, res) => {
-  res.json({ appName: APP_NAME, orgName: ORG_NAME, supportEmail: SUPPORT_EMAIL, reviewTimeoutMinutes: REVIEW_TIMEOUT_MIN });
+  res.json({ product: PRODUCT, supportEmail: SUPPORT_EMAIL, demo: auth.demoEnabled() });
 });
 
-// --- auth -------------------------------------------------------------------
-const loginAttempts = new Map();
-app.post('/api/login', wrap(async (req, res) => {
+// --- sign-in ----------------------------------------------------------------
+const attempts = new Map();
+function throttle(req, res) {
   const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0];
-  const a = loginAttempts.get(ip) || { n: 0, t: Date.now() };
+  const a = attempts.get(ip) || { n: 0, t: Date.now() };
   if (Date.now() - a.t > 15 * 60 * 1000) { a.n = 0; a.t = Date.now(); }
-  if (a.n >= 10) return res.status(429).json({ error: 'Too many sign-in attempts. Wait 15 minutes and try again.' });
+  attempts.set(ip, a);
+  if (a.n >= 10) { res.status(429).json({ error: 'Too many sign-in attempts. Wait 15 minutes and try again.' }); return null; }
+  return a;
+}
+
+// The account list on the sign-in page: one per role, plus added users
+// (they still need their password).
+app.get('/api/demo', wrap(async (req, res) => {
+  if (!auth.demoEnabled()) return res.json({ enabled: false, accounts: [] });
+  const users = (await auth.allUsers()).filter((u) => u.active !== false).map((u) => ({ kind: 'user', role: u.role, name: u.name, email: u.email }));
+  const demo = auth.demoAccounts().map((a) => ({ kind: 'demo', role: a.role, name: a.name, email: a.email }));
+  res.json({ enabled: true, accounts: demo.concat(users) });
+}));
+
+app.post('/api/demo-login', wrap(async (req, res) => {
+  if (!auth.demoEnabled()) return res.status(404).json({ error: 'Quick sign-in is turned off. Sign in with your email and password.' });
+  const a = auth.demoAccounts().find((x) => x.role === (req.body && req.body.role));
+  if (!a) return res.status(400).json({ error: 'Pick an account.' });
+  auth.setSession(res, a);
+  res.json({ user: auth.publicUser(a), home: auth.HOME[a.role] });
+}));
+
+app.post('/api/login', wrap(async (req, res) => {
+  const a = throttle(req, res); if (!a) return;
   await auth.ensureBootstrapAdmin();
-  const { username, password } = req.body || {};
-  const u = await auth.getUser(username);
+  const { email, password } = req.body || {};
+  const u = await auth.getUser(email);
   if (!u || u.active === false || !auth.checkPassword(password || '', u)) {
-    a.n++; loginAttempts.set(ip, a);
-    if (!process.env.ADMIN_PASSWORD && !u) return res.status(401).json({ error: 'Sign-in is not set up yet. The administrator must set ADMIN_PASSWORD and redeploy.' });
-    return res.status(401).json({ error: 'Wrong username or password.' });
+    a.n++;
+    return res.status(401).json({ error: 'Wrong email or password.' });
   }
-  loginAttempts.delete(ip);
-  auth.setSession(res, u.username);
-  res.json({ user: auth.publicUser(u) });
+  a.n = 0;
+  u.kind = 'user';
+  auth.setSession(res, u);
+  res.json({ user: auth.publicUser(u), home: auth.HOME[u.role] });
 }));
 
 app.post('/api/logout', (req, res) => { auth.clearSession(res); res.json({ ok: true }); });
 
 app.get('/api/me', (req, res) => {
   if (!req.user) return res.status(401).json({ error: 'Please sign in.' });
-  res.json({ user: auth.publicUser(req.user), appName: APP_NAME, orgName: ORG_NAME, supportEmail: SUPPORT_EMAIL, workflowId: WORKFLOW_ID, reviewTimeoutMinutes: REVIEW_TIMEOUT_MIN, storage: store.persistent() ? 'ok' : 'memory' });
+  const out = {
+    user: auth.publicUser(req.user),
+    home: auth.HOME[req.user.role] || '/',
+    product: PRODUCT,
+    support: { email: SUPPORT_EMAIL, workflowId: WORKFLOW_ID, orgId: ORG_ID || null },
+    reviewTimeoutMinutes: REVIEW_TIMEOUT_MIN,
+    demo: auth.demoEnabled(),
+    storage: store.persistent() ? 'ok' : 'memory',
+  };
+  if (req.user.role === 'admin') out.setupWarnings = missingEnv();
+  res.json(out);
 });
 
 app.post('/api/me/password', anyUser, wrap(async (req, res) => {
+  if (req.user.kind === 'demo') return res.status(400).json({ error: 'Demo accounts have no password. Ask an admin to add you as a user to get one.' });
   const { current, next } = req.body || {};
   if (!auth.checkPassword(current || '', req.user)) return res.status(400).json({ error: 'Your current password is not correct.' });
-  if (!next || String(next).length < 8) return res.status(400).json({ error: 'The new password needs at least 8 characters.' });
+  if (!next || String(next).length < 10) return res.status(400).json({ error: 'The new password needs at least 10 characters.' });
   Object.assign(req.user, auth.hashPassword(next));
   await auth.saveUser(req.user);
   res.json({ ok: true });
@@ -282,44 +360,51 @@ app.post('/api/me/password', anyUser, wrap(async (req, res) => {
 
 // --- users (admin) ----------------------------------------------------------
 app.get('/api/users', adminOnly, wrap(async (req, res) => {
-  res.json({ users: (await auth.allUsers()).map(auth.publicUser) });
+  const users = (await auth.allUsers()).map(auth.publicUser);
+  const demo = auth.demoEnabled() ? auth.demoAccounts().map(auth.publicUser) : [];
+  res.json({ users, demo });
 }));
 
 app.post('/api/users', adminOnly, wrap(async (req, res) => {
   const b = req.body || {};
-  const username = auth.normName(b.username);
-  if (!/^[a-z0-9._-]{3,40}$/.test(username)) return res.status(400).json({ error: 'Username: 3–40 characters, letters, digits, dot, dash or underscore.' });
+  const email = auth.normEmail(b.email);
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Enter a valid email address.' });
   if (!auth.ROLES.includes(b.role)) return res.status(400).json({ error: 'Pick a role.' });
-  let u = await auth.getUser(username);
-  const isNew = !u;
-  if (isNew && (!b.password || String(b.password).length < 8)) return res.status(400).json({ error: 'Set a password of at least 8 characters.' });
-  if (b.role === 'officer' && !String(b.officerId || (u && u.officerId) || '').trim()) return res.status(400).json({ error: 'Compliance officers need an officer ID (for example OFF-2147). It is written into the audit trail.' });
-  if (!isNew && u.username === req.user.username && b.role !== 'admin') return res.status(400).json({ error: 'You cannot remove your own administrator role.' });
-  u = u || { username, createdAt: new Date().toISOString() };
-  u.name = String(b.name || u.name || username).slice(0, 80);
+  if (auth.demoAccounts().some((d) => d.email === email)) return res.status(400).json({ error: 'That email belongs to a demo account on the sign-in page. Use another address.' });
+  let u = await auth.getUser(email);
+  const isNew = !u || b.isNew;
+  if (b.isNew && u) return res.status(409).json({ error: 'A user with that email already exists.' });
+  if (isNew && (!b.password || String(b.password).length < 10)) return res.status(400).json({ error: 'Set a password of at least 10 characters.' });
+  if (!isNew && b.password && String(b.password).length < 10) return res.status(400).json({ error: 'The new password needs at least 10 characters.' });
+  const officerId = String(b.officerId != null ? b.officerId : (u && u.officerId) || '').trim().toUpperCase().slice(0, 30);
+  if (b.role === 'officer' && !officerId) return res.status(400).json({ error: 'Compliance officers need an officer ID (for example OFF-2147). It is written into the audit trail.' });
+  if (!String(b.name || (u && u.name) || '').trim()) return res.status(400).json({ error: 'Enter a name.' });
+  if (!isNew && req.user.email === email && b.role !== 'admin') return res.status(400).json({ error: 'You cannot remove your own admin role.' });
+  u = u || { email, createdAt: new Date().toISOString() };
+  u.name = String(b.name || u.name).trim().slice(0, 80);
   u.role = b.role;
-  u.officerId = String(b.officerId != null ? b.officerId : (u.officerId || '')).trim().toUpperCase().slice(0, 30);
+  u.officerId = officerId;
   u.active = b.active !== false;
   if (b.password) Object.assign(u, auth.hashPassword(b.password));
   await auth.saveUser(u);
   res.json({ user: auth.publicUser(u), created: isNew });
 }));
 
-app.delete('/api/users/:username', adminOnly, wrap(async (req, res) => {
-  const name = auth.normName(req.params.username);
-  if (name === req.user.username) return res.status(400).json({ error: 'You cannot delete your own account.' });
-  await auth.deleteUser(name);
+app.delete('/api/users/:email', adminOnly, wrap(async (req, res) => {
+  const email = auth.normEmail(req.params.email);
+  if (email === req.user.email) return res.status(400).json({ error: 'You cannot delete your own account.' });
+  await auth.deleteUser(email);
   res.json({ ok: true });
 }));
 
 // --- samples + submit -------------------------------------------------------
 app.get('/api/samples', anyUser, (req, res) => {
-  res.json({ samples: SAMPLES.map((s) => ({ key: s.key, title: s.title, expect: s.expect, customer: s.customer, alert: s.alert })) });
+  res.json({ samples: SAMPLES.map((s) => ({ key: s.key, title: s.title, expect: s.expect, expectTone: s.expectTone, customer: s.customer, desc: s.desc, alert: s.alert })) });
 });
 
 const REQUIRED_FIELDS = ['alert_id', 'rule_code', 'subject_account', 'narrative'];
 
-app.post('/api/alerts', auth.requireRole('analyst', 'admin', 'officer'), wrap(async (req, res) => {
+app.post('/api/alerts', auth.requireRole('analyst', 'admin'), wrap(async (req, res) => {
   let alert = req.body && req.body.alert;
   if (typeof alert === 'string') {
     try { alert = JSON.parse(alert); } catch (e) { return res.status(400).json({ error: 'The alert is not valid JSON: ' + e.message }); }
@@ -333,10 +418,11 @@ app.post('/api/alerts', auth.requireRole('analyst', 'admin', 'officer'), wrap(as
     if (isNaN(n) || n < 0 || n > 100) return res.status(400).json({ error: 'Alert score must be a number from 0 to 100.' });
     alert.score = n;
   }
+  const note = String((req.body && req.body.note) || '').trim().slice(0, 500);
 
   const existing = (await allCases()).find((c) => c.alertId === alert.alert_id);
   if (existing && !(req.body && req.body.allowDuplicate)) {
-    return res.status(409).json({ error: `Alert ${alert.alert_id} was already submitted on ${existing.createdAt.slice(0, 10)}.`, existingId: existing.id });
+    return res.status(409).json({ error: `Alert ${alert.alert_id} was already submitted on ${String(existing.createdAt).slice(0, 10)}.`, existingId: canSee(req.user, existing) ? existing.id : '' });
   }
 
   const cust = String(alert.narrative || '').match(/\b(CUS-\d{3,})\b/);
@@ -364,9 +450,11 @@ app.post('/api/alerts', auth.requireRole('analyst', 'admin', 'officer'), wrap(as
     account: alert.subject_account,
     customerId: cust ? cust[1] : '',
     alert,
+    note,
     opusStatus: 'PENDING',
-    submittedBy: req.user.username,
-    submittedByName: req.user.name || req.user.username,
+    submittedBy: req.user.email,
+    submittedByName: req.user.name,
+    submittedRole: req.user.role,
     createdAt: new Date().toISOString(),
     duplicateOf: existing ? existing.id : '',
   };
@@ -376,35 +464,68 @@ app.post('/api/alerts', auth.requireRole('analyst', 'admin', 'officer'), wrap(as
 
 // --- cases ------------------------------------------------------------------
 app.get('/api/cases', anyUser, wrap(async (req, res) => {
-  let cases = await allCases();
-  const reviews = await allReviews();
-  // Refresh a few running cases per call so lists move without a page per case.
-  const live = cases.filter((c) => !TERMINAL.includes(c.opusStatus) || (c.opusStatus === 'COMPLETED' && !c.result)).slice(0, 6);
-  await Promise.all(live.map((c) => refreshCase(c).catch(() => c)));
-  res.json({ cases: cases.map((c) => toRow(c, reviewForCase(c, reviews))) });
+  res.json({ cases: await rowsFor(req.user, true), scope: req.user.role === 'analyst' ? 'mine' : 'all' });
 }));
 
-app.get('/api/cases/:id', anyUser, wrap(async (req, res) => {
+// Admin clean-up: keep the newest few, delete the rest with their reviews.
+app.post('/api/cases/clear', adminOnly, wrap(async (req, res) => {
+  const cases = await allCases();
+  const reviews = await allReviews();
+  const drop = cases.slice(KEEP_ON_CLEAR);
+  for (const c of drop) await deleteCaseAndReviews(c, reviews);
+  res.json({ cleared: drop.length, kept: Math.min(cases.length, KEEP_ON_CLEAR) });
+}));
+
+async function caseForReq(req, res) {
   const c = await getCase(req.params.id);
-  if (!c || c.deleted) return res.status(404).json({ error: 'Case not found.' });
+  if (!c || c.deleted || !canSee(req.user, c)) { res.status(404).json({ error: 'Case not found.' }); return null; }
+  return c;
+}
+
+app.get('/api/cases/:id', anyUser, wrap(async (req, res) => {
+  const c = await caseForReq(req, res); if (!c) return;
   await refreshCase(c, true);
   const ev = await getEvidence(c);
-  const reviews = await allReviews();
-  const review = reviewForCase(c, reviews);
+  const review = reviewForCase(c, await allReviews());
   const original = c.duplicateOf ? await getCase(c.duplicateOf) : null;
+  const pr = review ? publicReview(review) : null;
+  if (pr) pr.ownAlert = c.submittedBy === req.user.email;
   res.json({
     case: toRow(c, review),
     alert: c.alert,
     result: c.result || null,
     evidence: ev,
-    review: review ? publicReview(review) : null,
-    duplicateOfAlert: original ? original.alertId : '',
+    review: pr,
+    duplicateOfAlert: original && canSee(req.user, original) ? original.alertId : '',
+  });
+}));
+
+// What "Report a problem" puts in the email for this case.
+app.get('/api/cases/:id/support', anyUser, wrap(async (req, res) => {
+  const c = await caseForReq(req, res); if (!c) return;
+  const review = reviewForCase(c, await allReviews());
+  const row = toRow(c, review);
+  const ev = evCache.get(c.id) ? evCache.get(c.id).ev : await store.get('aml:evidence:' + c.id);
+  const failedStage = ev && ev.stages ? ev.stages.find((s) => s.status === 'FAILED' || s.status === 'STOPPED') : null;
+  const failed = ['FAILED', 'TIMED_OUT', 'CANCELLED', 'COMPLETED_NO_RESULT'].includes(row.stage);
+  res.json({
+    caseId: c.caseId,
+    executionId: c.caseId,
+    reference: c.alertId,
+    status: row.stage,
+    failed,
+    failedAt: failed && failedStage ? failedStage.label : null,
+    reason: failed ? (c.error || (row.stage === 'TIMED_OUT' ? 'The officer review window closed before a decision was recorded.' : 'The case stopped before a disposition was recorded.')) : null,
+    reviewExecutionId: review ? review.executionId : null,
+    submittedAt: c.createdAt,
+    submittedBy: submitterName(c),
+    finishedAt: c.finishedAt || null,
+    workflowId: WORKFLOW_ID,
   });
 }));
 
 app.post('/api/cases/:id/refresh', anyUser, wrap(async (req, res) => {
-  const c = await getCase(req.params.id);
-  if (!c || c.deleted) return res.status(404).json({ error: 'Case not found.' });
+  const c = await caseForReq(req, res); if (!c) return;
   evCache.delete(c.id);
   await refreshCase(c, true);
   res.json({ ok: true });
@@ -413,21 +534,61 @@ app.post('/api/cases/:id/refresh', anyUser, wrap(async (req, res) => {
 app.delete('/api/cases/:id', adminOnly, wrap(async (req, res) => {
   const c = await getCase(req.params.id);
   if (!c) return res.status(404).json({ error: 'Case not found.' });
-  await store.hdel(CASES_KEY, c.id);
-  await store.del('aml:evidence:' + c.id);
+  await deleteCaseAndReviews(c, await allReviews());
   res.json({ ok: true });
 }));
 
 function csvCell(v) { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
 
 app.get('/api/export.csv', officerOrAdmin, wrap(async (req, res) => {
-  const cases = await allCases();
-  const reviews = await allReviews();
-  const cols = ['alertId', 'customerId', 'customerName', 'account', 'rule', 'alertScore', 'riskScore', 'recommended', 'officerAction', 'finalDisposition', 'queue', 'slaHours', 'officerId', 'stage', 'submittedBy', 'createdAt', 'duplicateOf'];
-  const lines = [cols.join(',')].concat(cases.map((c) => { const r = toRow(c, reviewForCase(c, reviews)); return cols.map((k) => csvCell(r[k])).join(','); }));
+  let rows = await rowsFor(req.user, false);
+  if (req.query.preset !== undefined) {
+    const { from, to } = report.periodBounds(req.query);
+    rows = rows.filter((r) => { const t = Date.parse(r.createdAt); return (!from || t >= from.getTime()) && (!to || t < to.getTime()); });
+  }
+  const cols = ['alertId', 'customerId', 'customerName', 'kycRisk', 'account', 'rule', 'alertScore', 'riskScore', 'recommended', 'officerAction', 'finalDisposition', 'queue', 'slaHours', 'officerId', 'officerName', 'stage', 'submittedBy', 'createdAt', 'finishedAt', 'durationMs', 'duplicateOf'];
+  const lines = [cols.join(',')].concat(rows.map((r) => cols.map((k) => csvCell(r[k])).join(',')));
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="aml-alerts-' + new Date().toISOString().slice(0, 10) + '.csv"');
   res.send(lines.join('\n'));
+}));
+
+// --- reports + read-only neighbour views -------------------------------------
+app.get('/api/report', anyUser, wrap(async (req, res) => {
+  const rows = await rowsFor(req.user, false);
+  const out = report.build(rows, req.query);
+  out.scope = req.user.role === 'analyst' ? 'mine' : 'all';
+  res.json(out);
+}));
+
+function tally(rows, keyFn, extra) {
+  const m = new Map();
+  rows.forEach((r) => {
+    const k = keyFn(r); if (!k) return;
+    if (!m.has(k)) m.set(k, Object.assign({ key: k, alerts: 0, open: 0, CLOSE: 0, REFER: 0, ESCALATE: 0, last: '' }, extra ? extra(r) : {}));
+    const g = m.get(k);
+    g.alerts++;
+    if (r.stage === 'COMPLETED' && DISPOSITIONS.includes(r.finalDisposition)) g[r.finalDisposition]++;
+    else if (['QUEUED', 'RUNNING', 'FINALISING', 'AWAITING_REVIEW'].includes(r.stage)) g.open++;
+    if (String(r.createdAt) > g.last) g.last = r.createdAt;
+    if (extra) Object.entries(extra(r)).forEach(([kk, v]) => { if (v && !g[kk]) g[kk] = v; });
+  });
+  return [...m.values()].sort((a, b) => String(b.last).localeCompare(String(a.last)));
+}
+
+app.get('/api/customers', anyUser, wrap(async (req, res) => {
+  const rows = await rowsFor(req.user, false);
+  res.json({ customers: tally(rows, (r) => r.customerId || null, (r) => ({ name: r.customerName, kycRisk: r.kycRisk, account: r.account })) });
+}));
+
+app.get('/api/rules', anyUser, wrap(async (req, res) => {
+  const rows = await rowsFor(req.user, false);
+  res.json({ rules: tally(rows, (r) => r.rule || null).map((g) => { const done = g.CLOSE + g.REFER + g.ESCALATE; return Object.assign(g, { finished: done, fpRate: done ? g.CLOSE / done : null }); }) });
+}));
+
+app.get('/api/queues', anyUser, wrap(async (req, res) => {
+  const rows = (await rowsFor(req.user, false)).filter((r) => r.stage === 'COMPLETED' && r.queue);
+  res.json({ items: rows.map((r) => ({ id: r.id, alertId: r.alertId, customerName: r.customerName, customerId: r.customerId, queue: r.queue, finalDisposition: r.finalDisposition, slaHours: r.slaHours, routedAt: r.finishedAt, dueAt: r.slaHours && r.finishedAt ? new Date(Date.parse(r.finishedAt) + r.slaHours * 3600000).toISOString() : null, officerName: r.officerName, officerId: r.officerId, riskScore: r.riskScore })) });
 }));
 
 // --- officer reviews --------------------------------------------------------
@@ -452,15 +613,16 @@ function publicReview(r) {
 app.get('/api/reviews', officerOrAdmin, wrap(async (req, res) => {
   const reviews = await allReviews();
   const cases = await store.hgetall(CASES_KEY);
-  res.json({
-    reviews: reviews.map((r) => {
-      const p = publicReview(r);
-      const c = r.linkedCaseId && cases[r.linkedCaseId];
-      if (c) { p.rule = c.rule; p.account = c.account; p.priority = c.priority; }
-      delete p.presentation;
-      return p;
-    }),
+  const list = reviews.map((r) => {
+    const p = publicReview(r);
+    const c = r.linkedCaseId && cases[r.linkedCaseId];
+    if (c) { p.rule = c.rule; p.account = c.account; p.priority = c.priority; p.submittedBy = submitterName(c); p.ownAlert = c.submittedBy === req.user.email; p.caseStage = toRow(c, r).stage; p.finalDisposition = (c.result && c.result.final_disposition) || ''; p.queue = (c.result && c.result.routing && c.result.routing.queue) || ''; }
+    delete p.presentation;
+    return p;
   });
+  const pending = list.filter((r) => r.state === 'PENDING' || r.state === 'SUBMITTING').sort((a, b) => String(a.receivedAt).localeCompare(String(b.receivedAt)));
+  const log = list.filter((r) => r.decision).sort((a, b) => String(b.decision.at).localeCompare(String(a.decision.at))).slice(0, 50);
+  res.json({ reviews: list, pending, log });
 }));
 
 app.get('/api/reviews/:id', officerOrAdmin, wrap(async (req, res) => {
@@ -515,6 +677,8 @@ app.post('/api/reviews/:id/decision', officerOrAdmin, wrap(async (req, res) => {
   if (state === 'DECIDED') return res.status(409).json({ error: 'This review was already decided by ' + ((r.decision && r.decision.byName) || 'another officer') + '.' });
   if (state === 'EXPIRED') return res.status(410).json({ error: 'The review window for this alert has closed, so the decision can no longer be recorded. The case has timed out on the triage service.' });
   if (r.status === 'SUBMITTING' && r.lockedAt && Date.now() - Date.parse(r.lockedAt) < 30000) return res.status(409).json({ error: 'Another officer is submitting a decision for this alert right now.' });
+  const linked = r.linkedCaseId ? await getCase(r.linkedCaseId) : null;
+  if (linked && linked.submittedBy === req.user.email) return res.status(409).json({ error: 'You submitted this alert, so another officer must decide it.' });
 
   const b = req.body || {};
   const action = String(b.action || '').toUpperCase();
@@ -529,7 +693,7 @@ app.post('/api/reviews/:id/decision', officerOrAdmin, wrap(async (req, res) => {
   const text = oneLine(b.rationale);
   if (text.length < 10) return res.status(400).json({ error: action === 'ANNOTATE' ? 'Write your notes (at least 10 characters).' : 'Write your rationale (at least 10 characters). It is kept word for word in the audit trail.' });
   if (text.length > 1500) return res.status(400).json({ error: 'Keep the rationale under 1,500 characters.' });
-  const officerId = (req.user.officerId || req.user.username).toUpperCase();
+  const officerId = auth.officerIdOf(req.user);
   const responseText = composeResponse(action, finalDisp, text, officerId);
 
   r.status = 'SUBMITTING'; r.lockedAt = new Date().toISOString();
@@ -551,12 +715,9 @@ app.post('/api/reviews/:id/decision', officerOrAdmin, wrap(async (req, res) => {
   if (resp.status >= 200 && resp.status < 300) {
     r.status = 'DECIDED';
     r.error = '';
-    r.decision = { action, finalDisposition: finalDisp, recommended, rationale: text, officerId, by: req.user.username, byName: req.user.name || req.user.username, at: new Date().toISOString(), responseText };
+    r.decision = { action, finalDisposition: finalDisp, recommended, rationale: text, officerId, by: req.user.email, byName: req.user.name, at: new Date().toISOString(), responseText };
     await saveReview(r);
-    if (r.linkedCaseId) {
-      const c = await getCase(r.linkedCaseId);
-      if (c) { c.decision = r.decision; c.opusStatus = c.opusStatus === 'WAITING' ? 'IN_PROGRESS' : c.opusStatus; await saveCase(c); lastPoll.delete(c.id); }
-    }
+    if (linked) { linked.decision = r.decision; linked.opusStatus = linked.opusStatus === 'WAITING' ? 'IN_PROGRESS' : linked.opusStatus; await saveCase(linked); lastPoll.delete(linked.id); }
     return res.json({ ok: true, review: publicReview(r) });
   }
   if (resp.status === 401) {
@@ -582,8 +743,7 @@ app.post('/api/review-webhook', wrap(async (req, res) => {
   const cb = p.callback || {};
   if (!cb.url || !cb.token) return res.status(400).json({ error: 'Missing callback.' });
   const id = crypto.createHash('sha256').update(String(cb.token)).digest('hex').slice(0, 20);
-  const existing = await getReview(id);
-  if (existing) return res.json({ ok: true, id, duplicate: true });
+  if (await getReview(id)) return res.json({ ok: true, id, duplicate: true });
 
   const { manifest, md } = evidence.findPacket(p.inputs || p);
   const alertId = (manifest && manifest.alert_id) || ((md || '').match(/CASE REVIEW · (\S+)/) || [])[1] || '';
@@ -631,6 +791,7 @@ app.get('/api/system', adminOnly, wrap(async (req, res) => {
   res.json({
     missing: missingEnv(),
     storage: store.mode(),
+    demo: auth.demoEnabled(),
     workflowId: WORKFLOW_ID,
     apiBase: API_BASE,
     inputVar: INPUT_VAR,
@@ -639,6 +800,7 @@ app.get('/api/system', adminOnly, wrap(async (req, res) => {
     webhookUrl: host ? `${proto}://${host}/api/review-webhook` : '/api/review-webhook',
     webhookHeader: WEBHOOK_HEADER,
     reviewTimeoutMinutes: REVIEW_TIMEOUT_MIN,
+    supportEmail: SUPPORT_EMAIL,
     counts: { cases: cases.length, reviews: reviews.length, unlinkedReviews: reviews.filter((r) => !r.linkedCaseId).length },
     unlinked: reviews.filter((r) => !r.linkedCaseId).map((r) => ({ id: r.id, alertId: r.alertId, receivedAt: r.receivedAt, state: reviewState(r), executionId: r.executionId })),
   });
@@ -646,6 +808,7 @@ app.get('/api/system', adminOnly, wrap(async (req, res) => {
 
 // --- static -----------------------------------------------------------------
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found.' }));
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'] }));
 
 module.exports = app;
