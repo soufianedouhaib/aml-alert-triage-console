@@ -39,6 +39,7 @@ function missingEnv() {
   if (!process.env.ADMIN_PASSWORD) m.push('ADMIN_PASSWORD');
   if (!process.env.SESSION_SECRET) m.push('SESSION_SECRET');
   if (!process.env.REVIEW_WEBHOOK_SECRET) m.push('REVIEW_WEBHOOK_SECRET');
+  if (!SUPPORT_EMAIL) m.push('SUPPORT_EMAIL (where Contact Opus sends messages)');
   if (!store.persistent()) m.push('Redis storage (KV_REST_API_URL + KV_REST_API_TOKEN, or REDIS_URL)');
   return m;
 }
@@ -267,7 +268,7 @@ app.post('/api/logout', (req, res) => { auth.clearSession(res); res.json({ ok: t
 
 app.get('/api/me', (req, res) => {
   if (!req.user) return res.status(401).json({ error: 'Please sign in.' });
-  res.json({ user: auth.publicUser(req.user), appName: APP_NAME, orgName: ORG_NAME, supportEmail: SUPPORT_EMAIL, reviewTimeoutMinutes: REVIEW_TIMEOUT_MIN, storage: store.persistent() ? 'ok' : 'memory' });
+  res.json({ user: auth.publicUser(req.user), appName: APP_NAME, orgName: ORG_NAME, supportEmail: SUPPORT_EMAIL, workflowId: WORKFLOW_ID, reviewTimeoutMinutes: REVIEW_TIMEOUT_MIN, storage: store.persistent() ? 'ok' : 'memory' });
 });
 
 app.post('/api/me/password', anyUser, wrap(async (req, res) => {
