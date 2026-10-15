@@ -3,45 +3,54 @@
   var esc = UI.esc;
   var me = null;
   var users = [];
-  var ROLE = { analyst: 'L1 Analyst', officer: 'Compliance Officer', admin: 'Administrator' };
+  var demo = [];
+
+  function row(u, isDemo) {
+    return '<tr><td><strong>' + esc(u.name) + '</strong>' + (u.email === me.email ? ' <span class="muted">(you)</span>' : '') + (isDemo ? '<span class="tag">Demo</span>' : '') + '</td>' +
+      '<td>' + esc(u.email) + '</td><td class="nowrap">' + esc(UI.ROLE_LABEL[u.role] || u.role) + '</td><td class="mono">' + esc(u.officerId && u.role !== 'analyst' ? u.officerId : '—') + '</td>' +
+      '<td>' + (u.active ? UI.pill('ok', 'Active') : UI.pill('', 'Disabled')) + '</td><td class="nowrap hide-sm">' + (u.createdAt ? UI.fmtDate(u.createdAt) : '<span class="muted">built in</span>') + '</td>' +
+      '<td class="num">' + (isDemo ? '' : '<span class="row-actions"><button type="button" class="btn small" data-edit="' + esc(u.email) + '">Edit</button>' + (u.email !== me.email ? ' <button type="button" class="btn small danger" data-del="' + esc(u.email) + '">Delete</button>' : '') + '</span>') + '</td></tr>';
+  }
 
   function render() {
-    UI.$('#list').innerHTML = '<div class="table-wrap"><table class="data"><thead><tr><th>Name</th><th>Role</th><th>Officer ID</th><th>Status</th><th></th></tr></thead><tbody>' +
-      users.map(function (u) {
-        return '<tr><td><div class="cell-main">' + esc(u.name) + '</div><div class="cell-sub">' + esc(u.username) + (u.username === me.user.username ? ' · you' : '') + '</div></td><td>' + esc(ROLE[u.role] || u.role) + '</td><td class="mono">' + esc(u.officerId || '—') + '</td><td>' + (u.active ? UI.pill('green', 'Active') : UI.pill('grey', 'Disabled')) + '</td>' +
-          '<td style="text-align:right;white-space:nowrap"><button class="btn btn-sm" data-edit="' + esc(u.username) + '">Edit</button> ' + (u.username !== me.user.username ? '<button class="btn btn-sm btn-danger" data-del="' + esc(u.username) + '">Delete</button>' : '') + '</td></tr>';
-      }).join('') + '</tbody></table></div>';
-    UI.$all('[data-edit]').forEach(function (b) { b.onclick = function () { edit(users.find(function (u) { return u.username === b.getAttribute('data-edit'); })); }; });
-    UI.$all('[data-del]').forEach(function (b) {
-      b.onclick = function () {
-        var name = b.getAttribute('data-del');
-        var d = UI.dialog('<div class="dlg-head"><h2>Delete ' + esc(name) + '?</h2><button class="x" data-close aria-label="Close">×</button></div><div class="dlg-body"><p>They can no longer sign in. Their past decisions stay in the audit trail.</p></div><div class="dlg-foot"><button class="btn" data-close>Cancel</button><button class="btn btn-primary" id="go">Delete</button></div>');
-        UI.$('#go', d).onclick = function () { UI.api('DELETE', '/api/users/' + encodeURIComponent(name)).then(function () { d.close(); UI.toast('User deleted'); load(); }).catch(function (e) { UI.toast(e.message, true); }); };
-      };
+    var all = demo.map(function (u) { return row(u, true); }).concat(users.map(function (u) { return row(u, false); }));
+    document.getElementById('list').innerHTML = '<table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Officer ID</th><th>Status</th><th class="hide-sm">Added</th><th></th></tr></thead><tbody>' + all.join('') + '</tbody></table>';
+    document.getElementById('demo-note').textContent = demo.length ? 'Demo accounts are picked on the sign-in page without a password. Turn them off with DEMO_MODE=false when the console goes live.' : '';
+    Array.prototype.forEach.call(document.querySelectorAll('[data-edit]'), function (b) { b.addEventListener('click', function () { edit(users.find(function (u) { return u.email === b.getAttribute('data-edit'); })); }); });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-del]'), function (b) {
+      b.addEventListener('click', function () {
+        var email = b.getAttribute('data-del');
+        var m = UI.modal('<h2>Delete ' + esc(email) + '?</h2><p>They can no longer sign in. Their past decisions stay in the audit trail.</p><div class="actions"><button class="btn" data-close>Cancel</button><button class="btn danger-solid" id="go">Delete</button></div>');
+        m.el.querySelector('#go').addEventListener('click', function () { UI.api('/api/users/' + encodeURIComponent(email), { method: 'DELETE' }).then(function () { m.close(); UI.toast('User deleted'); load(); }, function (e) { UI.toast(e.message); }); });
+      });
     });
   }
 
   function edit(u) {
     var isNew = !u; u = u || { role: 'analyst', active: true };
-    var d = UI.dialog('<form id="uf"><div class="dlg-head"><h2>' + (isNew ? 'Add user' : 'Edit ' + esc(u.username)) + '</h2><button type="button" class="x" data-close aria-label="Close">×</button></div><div class="dlg-body">' +
-      '<label class="field">Username<input name="username" value="' + esc(u.username || '') + '"' + (isNew ? '' : ' disabled') + ' autocomplete="off"></label>' +
-      '<label class="field">Full name<input name="name" value="' + esc(u.name || '') + '"></label>' +
-      '<label class="field">Role<select name="role">' + Object.keys(ROLE).map(function (k) { return '<option value="' + k + '"' + (u.role === k ? ' selected' : '') + '>' + ROLE[k] + '</option>'; }).join('') + '</select></label>' +
-      '<label class="field">Officer ID<span class="help">Required for compliance officers, for example OFF-2147.</span><input name="officerId" value="' + esc(u.officerId || '') + '"></label>' +
-      '<label class="field">' + (isNew ? 'Password' : 'New password') + '<span class="help">' + (isNew ? 'At least 8 characters.' : 'Leave empty to keep the current one.') + '</span><input name="password" type="password" autocomplete="new-password"></label>' +
-      '<label class="row" style="font-weight:550"><input type="checkbox" name="active" style="width:auto"' + (u.active !== false ? ' checked' : '') + '> Can sign in</label>' +
-      '<div class="err-text" id="uerr" hidden></div></div><div class="dlg-foot"><button type="button" class="btn" data-close>Cancel</button><button class="btn btn-primary" type="submit">Save</button></div></form>');
-    var f = UI.$('#uf', d);
+    var m = UI.modal('<form id="uf" class="stack" novalidate><h2 style="margin:0">' + (isNew ? 'Add user' : 'Edit ' + esc(u.name)) + '</h2>' +
+      '<label class="field"><span>Full name</span><input type="text" name="name" value="' + esc(u.name || '') + '"></label>' +
+      '<label class="field"><span>Email</span><input type="email" name="email" value="' + esc(u.email || '') + '"' + (isNew ? '' : ' disabled') + '></label>' +
+      '<label class="field"><span>Role</span><select name="role">' + Object.keys(UI.ROLE_LABEL).map(function (k) { return '<option value="' + k + '"' + (u.role === k ? ' selected' : '') + '>' + UI.ROLE_LABEL[k] + '</option>'; }).join('') + '</select></label>' +
+      '<label class="field"><span>Officer ID</span><input type="text" name="officerId" value="' + esc(u.officerId || '') + '" placeholder="e.g. OFF-2147"><span class="hint">Required for compliance officers. It goes into the audit trail.</span></label>' +
+      '<label class="field"><span>' + (isNew ? 'Password' : 'New password') + '</span><input type="password" name="password" autocomplete="new-password"><span class="hint">' + (isNew ? 'At least 10 characters. Give it to the person directly.' : 'Leave empty to keep the current one.') + '</span></label>' +
+      '<label class="toolbar" style="font-size:14px"><input type="checkbox" name="active" style="width:auto"' + (u.active !== false ? ' checked' : '') + '> Can sign in</label>' +
+      '<div class="alert bad" id="uerr" hidden></div>' +
+      '<div class="actions" style="margin-top:0"><button type="button" class="btn" data-close>Cancel</button><button class="btn primary" type="submit">' + (isNew ? 'Add user' : 'Save') + '</button></div></form>');
+    var f = m.el.querySelector('#uf');
     f.addEventListener('submit', function (e) {
       e.preventDefault();
-      var body = { username: isNew ? f.username.value : u.username, name: f.name.value, role: f.role.value, officerId: f.officerId.value, active: f.active.checked };
+      var body = { name: f.name.value, email: isNew ? f.email.value : u.email, role: f.role.value, officerId: f.officerId.value, active: f.active.checked, isNew: isNew };
       if (f.password.value) body.password = f.password.value;
-      UI.api('POST', '/api/users', body).then(function () { d.close(); UI.toast(isNew ? 'User added' : 'Saved'); load(); })
-        .catch(function (x) { var el = UI.$('#uerr', d); el.textContent = x.message; el.hidden = false; });
+      UI.api('/api/users', { method: 'POST', body: body }).then(function () { m.close(); UI.toast(isNew ? 'User added' : 'Saved'); load(); }, function (x) { UI.showError(m.el.querySelector('#uerr'), x); });
     });
   }
 
-  function load() { UI.api('GET', '/api/users').then(function (j) { users = j.users; render(); }).catch(function (e) { UI.toast(e.message, true); }); }
+  function load() { UI.api('/api/users').then(function (j) { users = j.users; demo = j.demo || []; render(); }, function (e) { UI.toast(e.message); }); }
 
-  UI.boot('users', function (m) { me = m; UI.$('#add').onclick = function () { edit(null); }; load(); }, { title: 'Users', roles: ['admin'] });
+  UI.boot({ active: 'users', title: 'Users', roles: ['admin'] }, function (user) {
+    me = user;
+    document.getElementById('add').addEventListener('click', function () { edit(null); });
+    load();
+  });
 })();

@@ -1,58 +1,66 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>New alert</title>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="/styles.css?v=2">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>New alert · AML Alert Triage</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css?v=4">
 </head>
 <body>
-<div id="root" class="boot"></div>
-<template id="tpl">
-  <div class="page-head">
-    <div><h1>New alert</h1><div class="sub">Submit a transaction-monitoring alert for investigation. Lookups, analysis, scoring and the narrative run automatically; a compliance officer then decides.</div></div>
-  </div>
-  <section class="card" style="margin-bottom:16px">
-    <div class="card-head"><h2>Start from an example</h2><span class="hint">Each example matches a customer in the core-banking test data.</span></div>
-    <div class="grid grid-3 card-pad" id="samples"><div class="faint">Loading examples…</div></div>
-  </section>
-  <form class="card" id="form" novalidate>
-    <div class="card-head">
-      <h2>Alert details</h2>
-      <div class="seg" role="tablist" aria-label="Input mode">
-        <button type="button" class="on" data-mode="form" role="tab" aria-selected="true">Form</button>
-        <button type="button" data-mode="json" role="tab" aria-selected="false">Paste JSON</button>
+  <main>
+    <div class="page-head">
+      <div>
+        <h1>New alert</h1>
+        <p>Enter one transaction-monitoring alert. The console runs the sanctions, adverse media and transaction lookups, scores the risk, drafts the narrative and sends it to a compliance officer for the disposition.</p>
       </div>
     </div>
-    <div class="card-pad" id="mode-form">
-      <div class="form-grid">
-        <label class="field"><span>Alert ID <span class="req">*</span></span><input name="alert_id" placeholder="e.g. ALT-2026-00147" required></label>
-        <label class="field"><span>Rule code <span class="req">*</span></span><input name="rule_code" placeholder="e.g. TM-003" required></label>
-        <label class="field">Generated at<input name="generated_at" placeholder="e.g. 2026-04-02T14:23:00Z"></label>
-        <label class="field"><span>Subject account <span class="req">*</span></span><input name="subject_account" placeholder="e.g. ACC-1001-CHK" required></label>
-        <label class="field">Alert score<span class="help">0–100, from the monitoring system.</span><input name="score" type="number" min="0" max="100" placeholder="e.g. 87"></label>
-        <label class="field">Priority<select name="priority"><option value="">—</option><option value="H">High</option><option value="M">Medium</option><option value="L">Low</option></select></label>
-        <label class="field span-2">Flagged transactions<span class="help">Comma-separated transaction IDs.</span><input name="flagged_txns" placeholder="e.g. TXN-A001,TXN-A002"></label>
-        <label class="field">Related accounts<input name="related_accounts" placeholder="e.g. ACC-1001-BIZ"></label>
-        <label class="field span-3"><span>Alert narrative <span class="req">*</span></span><span class="help">What the rule saw. Include the customer ID (for example CUS-1001) so the right profile is pulled.</span><textarea name="narrative" rows="5" required></textarea></label>
-        <label class="field">Source system<input name="system" placeholder="e.g. TM-Engine-v4.2"></label>
-      </div>
-    </div>
-    <div class="card-pad" id="mode-json" hidden>
-      <label class="field">Alert JSON<span class="help">One object. Required fields: alert_id, rule_code, subject_account, narrative.</span><textarea class="code" name="json" spellcheck="false"></textarea></label>
-    </div>
-    <div class="card-pad" style="border-top:1px solid var(--border)">
-      <div class="callout err" id="err" role="alert" hidden style="margin-bottom:12px"></div>
-      <div class="row" style="margin-top:0">
-        <button class="btn btn-primary" type="submit" id="go">Submit for investigation</button>
+
+    <form id="form" class="stack" novalidate>
+      <section class="card">
+        <div class="card-head"><div><h2>Example alerts</h2><p>Loads a ready-made alert into the form below, to see the whole process end to end. Nothing is submitted until you press Run investigation.</p></div></div>
+        <div class="samples" id="samples"><div class="muted small">Loading examples…</div></div>
+        <p class="hint">Made-up data. Each example matches a customer in the core-banking test data, and gets a fresh alert ID when you load it.</p>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <div><h2>Alert details</h2><p>As received from the monitoring system. Fields marked * are required.</p></div>
+          <div class="seg-choice" role="radiogroup" aria-label="How to enter the alert">
+            <button type="button" role="radio" aria-checked="true" data-mode="form">Form</button>
+            <button type="button" role="radio" aria-checked="false" data-mode="json">Paste JSON</button>
+          </div>
+        </div>
+        <div id="mode-form" class="form-grid">
+          <label class="field"><span>Alert ID <span class="req">*</span></span><input type="text" name="alert_id" placeholder="e.g. ALT-2026-00147"></label>
+          <label class="field"><span>Rule code <span class="req">*</span></span><input type="text" name="rule_code" placeholder="e.g. TM-003"></label>
+          <label class="field"><span>Generated at</span><input type="text" name="generated_at" placeholder="e.g. 2026-04-02T14:23:00Z"></label>
+          <label class="field"><span>Subject account <span class="req">*</span></span><input type="text" name="subject_account" placeholder="e.g. ACC-1001-CHK"></label>
+          <label class="field"><span>Alert score (0–100)</span><input type="number" name="score" min="0" max="100" placeholder="e.g. 87"></label>
+          <label class="field"><span>Priority</span><select name="priority"><option value="">—</option><option value="H">High</option><option value="M">Medium</option><option value="L">Low</option></select></label>
+          <label class="field span-2"><span>Flagged transactions</span><input type="text" name="flagged_txns" placeholder="e.g. TXN-A001,TXN-A002"><span class="hint">Comma-separated transaction IDs.</span></label>
+          <label class="field"><span>Related accounts</span><input type="text" name="related_accounts" placeholder="e.g. ACC-1001-BIZ"></label>
+          <label class="field span-3"><span>Alert narrative <span class="req">*</span></span><textarea name="narrative" rows="5" placeholder="What the rule saw."></textarea><span class="hint">Include the customer ID (for example CUS-1001) so the right KYC profile is pulled.</span></label>
+          <label class="field"><span>Source system</span><input type="text" name="system" placeholder="e.g. TM-Engine-v4.2"></label>
+        </div>
+        <div id="mode-json" hidden>
+          <label class="field"><span>Alert JSON</span><textarea class="code" name="json" spellcheck="false"></textarea><span class="hint">One object. Required: alert_id, rule_code, subject_account, narrative.</span></label>
+        </div>
+      </section>
+
+      <section class="card">
+        <label class="field"><span>Note for the officer (optional)</span><textarea name="note" rows="2" maxlength="500" placeholder="Anything the compliance officer should know"></textarea><span class="hint">Shown on the alert page and in the review queue. It is not sent to the investigation itself.</span></label>
+      </section>
+
+      <div class="alert bad" id="err" hidden></div>
+      <div class="toolbar">
+        <button class="btn primary" type="submit" id="go">Run investigation</button>
         <button class="btn" type="button" id="clear">Clear</button>
-        <span class="faint small">The full investigation usually takes 2–4 minutes before it reaches an officer.</span>
+        <span class="muted small" id="go-hint">The investigation usually takes 2–4 minutes before it reaches an officer.</span>
       </div>
-    </div>
-  </form>
-</template>
-<script src="/common.js?v=2"></script>
-<script src="/submit.js?v=2"></script>
+    </form>
+  </main>
+  <script src="/common.js?v=4"></script>
+  <script src="/submit.js?v=4"></script>
 </body>
 </html>

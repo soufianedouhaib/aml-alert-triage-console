@@ -1,19 +1,22 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Alert</title>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="/styles.css?v=2">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Alert · AML Alert Triage</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css?v=4">
 </head>
 <body>
-<div id="root" class="boot"></div>
-<template id="tpl">
-  <div style="margin-bottom:10px"><a href="/alerts.html" class="small">← All alerts</a></div>
-  <div id="view"><div class="skeleton">Loading case…</div></div>
-</template>
-<script src="/common.js?v=2"></script>
-<script src="/case.js?v=2"></script>
+  <main>
+    <p class="crumb"><a href="/" id="crumb-list">Alerts</a> / <span id="crumb-case">Case</span></p>
+    <div class="page-head" style="align-items:flex-start">
+      <div><h1 id="title">Alert</h1><p id="subtitle"></p></div>
+      <div class="toolbar" id="head-tools"></div>
+    </div>
+    <div id="view"><div class="card empty">Loading the alert…</div></div>
+  </main>
+  <script src="/common.js?v=4"></script>
+  <script src="/case.js?v=4"></script>
 </body>
 </html>

@@ -1,32 +1,22 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Users</title>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="/styles.css?v=2">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Users · AML Alert Triage</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css?v=4">
 </head>
 <body>
-<div id="root" class="boot"></div>
-<template id="tpl">
-  <div class="page-head">
-    <div><h1>Users</h1><div class="sub">Who can sign in and what they can do.</div></div>
-    <button class="btn btn-primary" id="add">Add user</button>
-  </div>
-  <section class="card" style="margin-bottom:16px">
-    <div id="list"><div class="skeleton">Loading…</div></div>
-  </section>
-  <section class="card card-pad">
-    <h2 style="margin-bottom:8px">Roles</h2>
-    <dl class="kv">
-      <dt>L1 Analyst</dt><dd>Submits alerts and follows their progress and outcomes.</dd>
-      <dt>Compliance Officer</dt><dd>Decides alerts in the review queue: confirm, override or annotate. Needs an officer ID, which is written into the audit trail.</dd>
-      <dt>Administrator</dt><dd>Everything above, plus users, deleting cases and the <a href="/system.html">system page</a>.</dd>
-    </dl>
-  </section>
-</template>
-<script src="/common.js?v=2"></script>
-<script src="/users.js?v=2"></script>
+  <main>
+    <div class="page-head">
+      <div><h1>Users</h1><p>L1 analysts submit alerts and see their own. Compliance officers see every alert and decide the reviews. Admins can do both and manage users.</p></div>
+      <button type="button" class="btn primary" id="add">Add user</button>
+    </div>
+    <div class="card flush"><div class="table-wrap" id="list"><div class="empty">Loading…</div></div></div>
+    <p class="hint" style="margin-top:12px" id="demo-note"></p>
+  </main>
+  <script src="/common.js?v=4"></script>
+  <script src="/users.js?v=4"></script>
 </body>
 </html>

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Overview · AML Alert Triage</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css?v=4">
+</head>
+<body>
+  <main>
+    <div class="page-head">
+      <div>
+        <p class="eyebrow" id="today"></p>
+        <h1 id="hello">Overview</h1>
+        <p id="lede">What needs your attention, and how this month is going.</p>
+      </div>
+      <div class="toolbar" id="head-actions"></div>
+    </div>
+    <div class="kpis" id="kpis"></div>
+    <div class="overview-grid">
+      <section class="card flush">
+        <div class="card-head pad"><div><h2>Needs attention</h2><p id="att-count"></p></div></div>
+        <ul class="attention" id="attention"><li class="att-empty">Loading…</li></ul>
+      </section>
+      <section class="card flush">
+        <div class="card-head pad"><div><h2>Recent submissions</h2><p id="recent-count"></p></div><a class="btn small" href="/" id="all-link">All alerts</a></div>
+        <div class="table-wrap" id="recent"></div>
+      </section>
+    </div>
+    <div class="alert bad" id="error" hidden style="margin-top:16px"></div>
+  </main>
+  <script src="/common.js?v=4"></script>
+  <script src="/overview.js?v=4"></script>
+</body>
+</html>

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Reports · AML Alert Triage</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css?v=4">
+</head>
+<body>
+  <main>
+    <div class="page-head">
+      <div>
+        <h1>Reports</h1>
+        <p id="report-lede">How alerts were disposed, how often they were false positives, which rules raised them, and who submitted and decided what.</p>
+      </div>
+      <div class="rb-controls">
+        <select id="filter-preset" aria-label="Period">
+          <option value="this-month" selected>This month</option>
+          <option value="today">Today</option>
+          <option value="last-7">Last 7 days</option>
+          <option value="last-month">Last month</option>
+          <option value="last-90">Last 90 days</option>
+          <option value="custom">Custom dates</option>
+          <option value="">All time</option>
+        </select>
+        <span id="custom-wrap" hidden class="rb-controls">
+          <input type="date" id="filter-from" aria-label="From">
+          <input type="date" id="filter-to" aria-label="To">
+        </span>
+        <a class="btn small" id="export-link" href="/api/export.csv" hidden>Export CSV</a>
+      </div>
+    </div>
+
+    <section class="card report-card">
+      <div class="ribbon">
+        <div class="rb-figures">
+          <div class="rb"><span class="rb-k">Closed as false positive</span><span class="rb-v rb-close" id="k-rate">—</span><span class="rb-s" id="k-rate-sub">—</span></div>
+          <div class="rb"><span class="rb-k">Escalated to SAR</span><span class="rb-v rb-escalate" id="k-esc">—</span><span class="rb-s" id="k-esc-sub">—</span></div>
+          <div class="rb"><span class="rb-k">Referred to L2</span><span class="rb-v" id="k-ref">—</span><span class="rb-s" id="k-ref-sub">—</span></div>
+          <div class="rb"><span class="rb-k">Alerts</span><span class="rb-v" id="k-count">—</span><span class="rb-s" id="k-count-sub">—</span></div>
+          <div class="rb"><span class="rb-k">Average run time</span><span class="rb-v" id="k-time">—</span><span class="rb-s" id="k-time-sub">—</span></div>
+        </div>
+      </div>
+      <div class="chapters">
+        <nav class="chapter-list" id="chapter-list" aria-label="Report chapters"></nav>
+        <div class="chapter-body" id="chapter-body" aria-live="polite"><div class="empty">Loading…</div></div>
+      </div>
+    </section>
+    <div class="alert bad" id="error" hidden style="margin-top:16px"></div>
+  </main>
+  <script src="/common.js?v=4"></script>
+  <script src="/report.js?v=4"></script>
+</body>
+</html>

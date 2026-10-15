@@ -1,25 +1,37 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Review queue</title>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="/styles.css?v=2">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Review queue · AML Alert Triage</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css?v=4">
 </head>
 <body>
-<div id="root" class="boot"></div>
-<template id="tpl">
-  <div class="page-head">
-    <div><h1>Review queue</h1><div class="sub" id="sub">Alerts waiting for a compliance officer's decision.</div></div>
-  </div>
-  <div class="callout warn" id="window-note" style="margin-bottom:16px"></div>
-  <section class="card">
-    <div class="card-head"><div class="toolbar" id="filters"></div></div>
-    <div id="list"><div class="skeleton">Loading…</div></div>
-  </section>
-</template>
-<script src="/common.js?v=2"></script>
-<script src="/reviews.js?v=2"></script>
+  <main>
+    <div class="page-head">
+      <div>
+        <h1>Review queue</h1>
+        <p>Alerts whose investigation is complete. Each one waits here until a compliance officer confirms, overrides or annotates the recommended disposition.</p>
+      </div>
+    </div>
+    <div class="stack">
+      <section class="card flush">
+        <div class="card-head pad"><div><h2>Waiting for a decision</h2><p id="wait-note">Oldest first.</p></div></div>
+        <div class="table-wrap" id="pending"><div class="empty">Loading…</div></div>
+      </section>
+      <section class="card flush" id="expired-card" hidden>
+        <div class="card-head pad"><div><h2>Window closed</h2><p>No decision was recorded in time; these cases timed out. Resubmit the alert to investigate it again.</p></div></div>
+        <div class="table-wrap" id="expired"></div>
+      </section>
+      <section class="card flush">
+        <div class="card-head pad"><div><h2>Decision log</h2><p>The 50 most recent decisions.</p></div></div>
+        <div class="table-wrap" id="log"></div>
+      </section>
+    </div>
+    <div class="alert bad" id="error" hidden style="margin-top:16px"></div>
+  </main>
+  <script src="/common.js?v=4"></script>
+  <script src="/reviews.js?v=4"></script>
 </body>
 </html>

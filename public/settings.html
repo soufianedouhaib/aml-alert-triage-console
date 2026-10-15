@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Settings · AML Alert Triage</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css?v=4">
+</head>
+<body>
+  <main>
+    <div class="page-head"><div><h1>Settings</h1><p>Your account, preferences and the review rules.</p></div></div>
+    <div class="grid-2">
+      <div class="stack">
+        <section class="card">
+          <h2 style="margin-bottom:14px">My account</h2>
+          <dl class="kv" id="account"></dl>
+          <div id="pw-wrap" style="margin-top:18px;padding-top:16px;border-top:1px solid var(--line)">
+            <h3>Password</h3>
+            <p class="hint" style="margin:2px 0 12px">At least 10 characters.</p>
+            <form id="pw-form" class="stack" style="gap:12px" novalidate>
+              <label class="field"><span>Current password</span><input type="password" name="current" autocomplete="current-password"></label>
+              <label class="field"><span>New password</span><input type="password" name="next" autocomplete="new-password"></label>
+              <div class="alert bad" id="pw-err" hidden></div>
+              <div><button class="btn primary small" type="submit">Change password</button></div>
+            </form>
+          </div>
+          <p class="hint" id="pw-demo" hidden style="margin-top:16px">Demo accounts have no password. An admin can add you as a user if you need one.</p>
+        </section>
+        <section class="card">
+          <h2 style="margin-bottom:6px">Appearance</h2>
+          <p class="hint" style="margin:0 0 12px">Saved on this device only.</p>
+          <div class="seg-choice" role="radiogroup" aria-label="Theme" id="theme-choice">
+            <button type="button" role="radio" data-theme="">Match my device</button>
+            <button type="button" role="radio" data-theme="light">Light</button>
+            <button type="button" role="radio" data-theme="dark">Dark</button>
+          </div>
+        </section>
+      </div>
+      <section class="card">
+        <h2 style="margin-bottom:6px">Review rules</h2>
+        <p class="hint" style="margin:0 0 14px">How alerts reach a decision. Ask IT to change these.</p>
+        <dl class="kv" id="rules"></dl>
+      </section>
+    </div>
+  </main>
+  <script src="/common.js?v=4"></script>
+  <script src="/settings.js?v=4"></script>
+</body>
+</html>
