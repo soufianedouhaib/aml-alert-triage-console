@@ -18,7 +18,7 @@ const WORKFLOW_ID = process.env.OPUS_WORKFLOW_ID || '67761781-8be5-4dd8-a1de-af8
 const INPUT_VAR = 'workflow_input_806ktowl2';            // TM Alert (JSON string)
 const INPUT_DISPLAY = 'TM Alert';
 const OUTPUT_VAR = 'workflow_output_bj5nkid7u';          // Final Disposition & Audit Trail (object)
-const OFFICER_RESPONSE_VAR = 'workflow_output_feqiebau8'; // Officer Response (str) on the review step
+const OFFICER_RESPONSE_VAR = process.env.OFFICER_RESPONSE_VAR || 'workflow_output_bhnpsw89f'; // Officer Response (str); only used when the packet carries no schema
 const REVIEW_TIMEOUT_MIN = Number(process.env.REVIEW_TIMEOUT_MINUTES || 10);
 const WEBHOOK_HEADER = String(process.env.REVIEW_WEBHOOK_HEADER || 'x-webhook-secret').toLowerCase();
 
@@ -77,6 +77,30 @@ async function opus(method, p, body) {
     throw new UpstreamError(r.status, 'Triage service error (' + r.status + '): ' + String(typeof msg === 'string' ? msg : JSON.stringify(msg)).slice(0, 300), json || text);
   }
   return { status: r.status, json: json || {} };
+}
+
+// The input variable's declared type, read from the workflow once and cached.
+let specCache = null;
+async function inputSpec() {
+  if (specCache && Date.now() - specCache.at < 10 * 60 * 1000) return specCache;
+  let found = null;
+  try {
+    const { json } = await opus('GET', `/workflow/${encodeURIComponent(WORKFLOW_ID)}`);
+    (function walk(v, d) {
+      if (found || !v || typeof v !== 'object' || d > 8) return;
+      if (v[INPUT_VAR] && Array.isArray(v[INPUT_VAR].allowed_types)) { found = v[INPUT_VAR]; return; }
+      for (const k of Object.keys(v)) walk(v[k], d + 1);
+    })(json, 0);
+  } catch (e) { /* fall back to the known declaration */ }
+  const t = found && found.allowed_types[0] ? found.allowed_types[0] : null;
+  specCache = {
+    at: Date.now(),
+    type: (t && t.type) || 'json_string',
+    typeDefinition: (t && t.type_definition) || null,
+    displayName: (found && found.display_name) || INPUT_DISPLAY,
+    fromWorkflow: !!found,
+  };
+  return specCache;
 }
 
 // ---------------------------------------------------------------------------
@@ -430,13 +454,17 @@ app.post('/api/alerts', auth.requireRole('analyst', 'admin'), wrap(async (req, r
   const caseId = created.json.caseId || created.json.id;
   if (!caseId) throw new UpstreamError(502, 'The triage service did not return a case id.');
 
-  const payload = { [INPUT_VAR]: { value: JSON.stringify(alert), type: 'str', displayName: INPUT_DISPLAY } };
+  // Send the alert with the type the workflow declares for its input
+  // (json_string). Sent as plain "str" the input step fails at once.
+  const spec = await inputSpec();
+  const payload = { [INPUT_VAR]: { value: JSON.stringify(alert), type: spec.type, displayName: spec.displayName } };
+  if (spec.typeDefinition) payload[INPUT_VAR].typeDefinition = spec.typeDefinition;
   try {
     await opus('POST', `/case/${encodeURIComponent(caseId)}/execute`, { payload });
   } catch (e) {
-    // Some deployments expect the declared json_string type name. Retry once on a validation error.
-    if (e.status === 400 || e.status === 422) {
-      payload[INPUT_VAR].type = 'json_string';
+    if ((e.status === 400 || e.status === 422) && payload[INPUT_VAR].type !== 'str') {
+      payload[INPUT_VAR].type = 'str';
+      delete payload[INPUT_VAR].typeDefinition;
       await opus('POST', `/case/${encodeURIComponent(caseId)}/execute`, { payload });
     } else throw e;
   }
@@ -732,16 +760,33 @@ app.post('/api/reviews/:id/decision', officerOrAdmin, wrap(async (req, res) => {
 }));
 
 // Inbound review request from the workflow (off-platform review task).
+// Last webhook calls, so the System page can say why Opus could not hand over a review.
+// Only header NAMES are kept, never values.
+async function logHook(req, status, reason, body) {
+  try {
+    const list = (await store.get('aml:webhook-log')) || [];
+    const b = body || req.body || {};
+    list.unshift({ at: new Date().toISOString(), status, reason,
+      headers: Object.keys(req.headers || {}).filter((h) => !/^(x-vercel|x-forwarded|x-real-ip|forwarded|cookie|authorization)/.test(h)).sort(),
+      executionId: String(b.execution_id || ''), bodyKeys: b && typeof b === 'object' ? Object.keys(b).slice(0, 12) : [] });
+    await store.set('aml:webhook-log', list.slice(0, 10));
+  } catch (e) { }
+}
+
 app.post('/api/review-webhook', wrap(async (req, res) => {
   const want = process.env.REVIEW_WEBHOOK_SECRET;
-  if (!want) return res.status(503).json({ error: 'Review webhook is not configured.' });
+  if (!want) { await logHook(req, 503, 'REVIEW_WEBHOOK_SECRET is not set in Vercel.'); return res.status(503).json({ error: 'Review webhook is not configured.' }); }
   const got = String(req.headers[WEBHOOK_HEADER] || '');
   const ok = got.length === want.length && crypto.timingSafeEqual(Buffer.from(got), Buffer.from(want));
-  if (!ok) return res.status(401).json({ error: 'Unauthorized.' });
+  if (!ok) {
+    await logHook(req, 401, got ? `Header ${WEBHOOK_HEADER} was sent but its value does not match REVIEW_WEBHOOK_SECRET.` : `Header ${WEBHOOK_HEADER} was not sent.`);
+    return res.status(401).json({ error: 'Unauthorized.' });
+  }
 
   const p = req.body || {};
   const cb = p.callback || {};
-  if (!cb.url || !cb.token) return res.status(400).json({ error: 'Missing callback.' });
+  if (!cb.url || !cb.token) { await logHook(req, 400, 'The body has no callback url/token (is the task set to "callback" mode?).'); return res.status(400).json({ error: 'Missing callback.' }); }
+  await logHook(req, 200, 'Accepted.', p);
   const id = crypto.createHash('sha256').update(String(cb.token)).digest('hex').slice(0, 20);
   if (await getReview(id)) return res.json({ ok: true, id, duplicate: true });
 
@@ -802,6 +847,9 @@ app.get('/api/system', adminOnly, wrap(async (req, res) => {
     reviewTimeoutMinutes: REVIEW_TIMEOUT_MIN,
     supportEmail: SUPPORT_EMAIL,
     counts: { cases: cases.length, reviews: reviews.length, unlinkedReviews: reviews.filter((r) => !r.linkedCaseId).length },
+    inputType: (await inputSpec()).type,
+    inputTypeFromWorkflow: (await inputSpec()).fromWorkflow,
+    webhookLog: (await store.get('aml:webhook-log')) || [],
     unlinked: reviews.filter((r) => !r.linkedCaseId).map((r) => ({ id: r.id, alertId: r.alertId, receivedAt: r.receivedAt, state: reviewState(r), executionId: r.executionId })),
   });
 }));
