@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Alerts · AML Alert Triage</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=6">
+  <link rel="stylesheet" href="/styles.css?v=7">
 </head>
 <body>
   <main>
@@ -22,9 +22,10 @@
     </div>
 
     <div class="alert warn confirm-row" id="clear-confirm" hidden style="margin-bottom:16px">
-      <span><strong style="display:inline">Clear alerts?</strong> This deletes every alert except the 3 newest, with their officer reviews and stored evidence. It cannot be undone.</span>
+      <span><strong style="display:inline">Clear alerts?</strong> Remove only the alerts that did not finish, or every alert. Their officer reviews and stored evidence go too, and it cannot be undone. Alerts still being investigated are kept.</span>
       <span class="spacer"></span>
-      <span class="btn-pair"><button type="button" class="btn small danger-solid" id="clear-yes">Yes, clear them</button>
+      <span class="btn-pair"><button type="button" class="btn small danger" id="clear-unfinished" data-mode="unfinished">Only unfinished</button>
+      <button type="button" class="btn small danger-solid" id="clear-all" data-mode="all">All alerts</button>
       <button type="button" class="btn small" id="clear-no">Cancel</button></span>
     </div>
     <div class="alert info" id="clear-note" hidden style="margin-bottom:16px"></div>
@@ -40,7 +41,7 @@
     </div>
     <div class="alert bad" id="error" hidden style="margin-top:16px"></div>
   </main>
-  <script src="/common.js?v=6"></script>
-  <script src="/cases.js?v=6"></script>
+  <script src="/common.js?v=7"></script>
+  <script src="/cases.js?v=7"></script>
 </body>
 </html>

@@ -6,7 +6,7 @@
   var demo = [];
 
   function row(u, isDemo) {
-    return '<tr><td><strong>' + esc(u.name) + '</strong>' + (u.email === me.email ? ' <span class="muted">(you)</span>' : '') + (isDemo ? '<span class="tag">Demo</span>' : '') + '</td>' +
+    return '<tr><td><strong>' + esc(u.name) + '</strong>' + (u.email === me.email ? ' <span class="muted">(you)</span>' : '') + '</td>' +
       '<td>' + esc(u.email) + '</td><td class="nowrap">' + esc(UI.ROLE_LABEL[u.role] || u.role) + '</td><td class="mono">' + esc(u.officerId && u.role !== 'analyst' ? u.officerId : '—') + '</td>' +
       '<td>' + (u.active ? UI.pill('ok', 'Active') : UI.pill('', 'Disabled')) + '</td><td class="nowrap hide-sm">' + (u.createdAt ? UI.fmtDate(u.createdAt) : '<span class="muted">built in</span>') + '</td>' +
       '<td class="num">' + (isDemo ? '' : '<span class="row-actions"><button type="button" class="btn small" data-edit="' + esc(u.email) + '">Edit</button>' + (u.email !== me.email ? ' <button type="button" class="btn small danger" data-del="' + esc(u.email) + '">Delete</button>' : '') + '</span>') + '</td></tr>';
@@ -15,7 +15,7 @@
   function render() {
     var all = demo.map(function (u) { return row(u, true); }).concat(users.map(function (u) { return row(u, false); }));
     document.getElementById('list').innerHTML = '<table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Officer ID</th><th>Status</th><th class="hide-sm">Added</th><th></th></tr></thead><tbody>' + all.join('') + '</tbody></table>';
-    document.getElementById('demo-note').textContent = demo.length ? 'Demo accounts are picked on the sign-in page without a password. Turn them off with DEMO_MODE=false when the console goes live.' : '';
+    document.getElementById('demo-note').textContent = demo.length ? 'The first ' + (demo.length === 3 ? 'three accounts are' : demo.length + ' accounts are') + ' chosen from the list on the sign-in page. People you add sign in with their email and password.' : '';
     Array.prototype.forEach.call(document.querySelectorAll('[data-edit]'), function (b) { b.addEventListener('click', function () { edit(users.find(function (u) { return u.email === b.getAttribute('data-edit'); })); }); });
     Array.prototype.forEach.call(document.querySelectorAll('[data-del]'), function (b) {
       b.addEventListener('click', function () {

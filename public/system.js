@@ -16,7 +16,7 @@
       '<dt>Workflow ID</dt><dd><code>' + esc(s.workflowId) + '</code></dd><dt>API base</dt><dd><code>' + esc(s.apiBase) + '</code></dd>' +
       '<dt>Input variable</dt><dd><code>' + esc(s.inputVar) + '</code> sent as <code>' + esc(s.inputType) + '</code>' + (s.inputTypeFromWorkflow ? ' (read from the workflow)' : ' (default; the workflow could not be read)') + '</dd><dt>Output variable</dt><dd><code>' + esc(s.outputVar) + '</code></dd>' +
       '<dt>Storage</dt><dd>' + esc(s.storage === 'memory' ? 'Not configured (temporary memory)' : 'Redis (' + s.storage + ')') + '</dd>' +
-      '<dt>Sign-in</dt><dd>' + (s.demo ? 'Demo accounts on (<code>DEMO_MODE</code>)' : 'Email and password only') + '</dd>' +
+      '<dt>Sign-in</dt><dd>' + (s.demo ? 'Account list on the sign-in page (<code>DEMO_MODE</code>)' : 'Email and password only') + '</dd>' +
       '<dt>Support email</dt><dd>' + esc(s.supportEmail || 'not set') + '</dd>' +
       '<dt>Records</dt><dd>' + s.counts.cases + ' alerts · ' + s.counts.reviews + ' reviews</dd></dl></section>';
     html += '<section class="card flush"><div class="card-head pad"><div><h2>Reviews not linked to an alert</h2><p>Packets for alerts that were not submitted from this console.</p></div></div>' +

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Page not found · AML Alert Triage</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css?v=7">
+</head>
+<body>
+  <main>
+    <section class="card notfound">
+      <p class="eyebrow">Page not found</p>
+      <h1>There is no page at this address</h1>
+      <p class="muted" id="nf-path"></p>
+      <p>The link may be mistyped or out of date. Use the menu, or go to one of these:</p>
+      <div class="toolbar" id="nf-links" style="margin-top:16px">
+        <a class="btn primary" href="/" id="nf-home">Go to the console</a>
+        <a class="btn" href="/">Alerts</a>
+        <a class="btn" href="/report.html">Reports</a>
+      </div>
+    </section>
+  </main>
+  <script src="/common.js?v=7"></script>
+  <script>
+    (function () {
+      document.getElementById('nf-path').textContent = location.pathname;
+      UI.boot({ active: '', title: 'Page not found' }, function (user, me) {
+        var home = document.getElementById('nf-home');
+        home.href = me.home || '/';
+        if (user.role === 'analyst' || user.role === 'admin') {
+          var a = document.createElement('a'); a.className = 'btn'; a.href = '/submit.html'; a.textContent = 'New alert';
+          document.getElementById('nf-links').appendChild(a);
+        }
+        if (user.role !== 'analyst') {
+          var r = document.createElement('a'); r.className = 'btn'; r.href = '/reviews.html'; r.textContent = 'Review queue';
+          document.getElementById('nf-links').appendChild(r);
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
