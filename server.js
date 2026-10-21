@@ -776,17 +776,20 @@ async function logHook(req, status, reason, body) {
 app.post('/api/review-webhook', wrap(async (req, res) => {
   const want = process.env.REVIEW_WEBHOOK_SECRET;
   if (!want) { await logHook(req, 503, 'REVIEW_WEBHOOK_SECRET is not set in Vercel.'); return res.status(503).json({ error: 'Review webhook is not configured.' }); }
-  const got = String(req.headers[WEBHOOK_HEADER] || '');
+  // The secret can come as a header (preferred) or, for tools that cannot set headers,
+  // as ?key=... on the webhook URL.
+  const viaQuery = !req.headers[WEBHOOK_HEADER] && req.query && req.query.key;
+  const got = String(req.headers[WEBHOOK_HEADER] || (req.query && req.query.key) || '');
   const ok = got.length === want.length && crypto.timingSafeEqual(Buffer.from(got), Buffer.from(want));
   if (!ok) {
-    await logHook(req, 401, got ? `Header ${WEBHOOK_HEADER} was sent but its value does not match REVIEW_WEBHOOK_SECRET.` : `Header ${WEBHOOK_HEADER} was not sent.`);
+    await logHook(req, 401, got ? (viaQuery ? 'The ?key= on the URL does not match REVIEW_WEBHOOK_SECRET.' : `Header ${WEBHOOK_HEADER} was sent but its value does not match REVIEW_WEBHOOK_SECRET.`) : `No secret: header ${WEBHOOK_HEADER} was not sent and the URL has no ?key=.`);
     return res.status(401).json({ error: 'Unauthorized.' });
   }
 
   const p = req.body || {};
   const cb = p.callback || {};
   if (!cb.url || !cb.token) { await logHook(req, 400, 'The body has no callback url/token (is the task set to "callback" mode?).'); return res.status(400).json({ error: 'Missing callback.' }); }
-  await logHook(req, 200, 'Accepted.', p);
+  await logHook(req, 200, viaQuery ? 'Accepted (secret from the URL).' : 'Accepted.', p);
   const id = crypto.createHash('sha256').update(String(cb.token)).digest('hex').slice(0, 20);
   if (await getReview(id)) return res.json({ ok: true, id, duplicate: true });
 
