@@ -28,9 +28,11 @@
       (log.length ? '<div class="table-wrap"><table><thead><tr><th>When</th><th>Result</th><th>Reason</th><th class="hide-sm">Headers sent (names only)</th></tr></thead><tbody>' + log.map(function (l) {
         return '<tr><td class="nowrap">' + UI.fmtDate(l.at) + '</td><td><span class="pill ' + (l.status === 200 ? 'ok' : 'bad') + '">' + esc(l.status === 200 ? 'Accepted' : 'Rejected ' + l.status) + '</span></td><td>' + esc(l.reason) + '</td><td class="hide-sm small muted">' + esc((l.headers || []).join(', ')) + '</td></tr>';
       }).join('') + '</tbody></table></div>' : '<div class="empty">No calls yet. If a run fails at the officer review step and nothing shows here, Opus is not calling this URL: check the review task\'s webhook URL.</div>') + '</section>';
-    html += '<section class="card flush" id="runlogs"><div class="card-head pad"><div><h2>Run logs</h2><p>Every run from submission to the end, failures included: what the console sent, each workflow step with its time and any error, the officer hand-over and the decision. For the engineering team.</p></div></div><div id="runlog-list"><div class="empty">Loading…</div></div></section>';
+    html += '<section class="card flush" id="runlogs"><div class="card-head pad"><div style="flex:1"><h2>Run logs</h2><p>Every run from submission to the end, failures included: what the console sent, each workflow step with its time and any error, the officer hand-over and the decision. For the engineering team.</p></div><button type="button" class="btn small" id="rl-refresh">Refresh</button></div><div id="runlog-list"><div class="empty">Loading…</div></div></section>';
     document.getElementById('view').innerHTML = html;
     loadRuns();
+    document.getElementById('rl-refresh').addEventListener('click', loadRuns);
+    if (UI.qs('run') || location.hash === '#runlogs') setTimeout(function () { var el = document.getElementById('runlogs'); if (el) el.scrollIntoView({ block: 'start' }); }, 60);
     document.getElementById('copy').addEventListener('click', function () { try { navigator.clipboard.writeText(s.webhookUrl); UI.toast('Copied'); } catch (e) { /* ignore */ } });
     Array.prototype.forEach.call(document.querySelectorAll('[data-del]'), function (b) { b.addEventListener('click', function () { UI.api('/api/reviews/' + encodeURIComponent(b.getAttribute('data-del')), { method: 'DELETE' }).then(load); }); });
   }
@@ -40,6 +42,7 @@
   var STAGE = { QUEUED: ['info', 'Queued'], PENDING: ['info', 'Queued'], RUNNING: ['info', 'Investigating'], IN_PROGRESS: ['info', 'Investigating'], AWAITING_REVIEW: ['warn', 'Awaiting officer'], WAITING: ['warn', 'Awaiting officer'],
     FINALISING: ['info', 'Routing decision'], COMPLETED: ['ok', 'Completed'], COMPLETED_NO_RESULT: ['bad', 'No result'], FAILED: ['bad', 'Did not finish'], TIMED_OUT: ['bad', 'Timed out'],
     CANCELLED: ['', 'Cancelled'], NOT_STARTED: ['bad', 'Not started'], REMOVED: ['', 'Removed'] };
+  function short(t, n) { t = String(t || ''); return t.length > n ? t.slice(0, n - 1) + '…' : t; }
   function stagePill(st) { var x = STAGE[st] || ['', st || '—']; return UI.pill(x[0], x[1]); }
   function time(iso) { if (!iso) return '—'; var d = new Date(iso); return isNaN(d) ? esc(iso) : d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }); }
   function loadRuns() {
@@ -50,8 +53,8 @@
       el.innerHTML = '<div class="table-wrap"><table><thead><tr><th>Started</th><th>Alert</th><th class="hide-sm">Case</th><th>Status</th><th class="num hide-sm">Events</th><th>Problems</th><th class="hide-sm">Last event</th><th class="num"><span class="sr-only">Action</span></th></tr></thead><tbody>' + runs.map(function (r) {
         var prob = r.errors ? UI.pill('bad', r.errors + (r.errors === 1 ? ' error' : ' errors')) : r.warnings ? UI.pill('warn', r.warnings + (r.warnings === 1 ? ' warning' : ' warnings')) : '<span class="muted small">None</span>';
         return '<tr><td class="nowrap">' + time(r.firstAt) + '</td><td><strong class="nowrap">' + esc(r.alertId || '—') + '</strong><span class="sub">' + UI.metaLine([r.customerName, r.submittedBy]) + '</span></td>' +
-          '<td class="hide-sm"><code>' + esc(r.id) + '</code></td><td>' + stagePill(r.stage) + '</td><td class="num hide-sm">' + (r.events || 0) + '</td><td>' + prob + (r.lastError ? '<span class="sub">' + esc(r.lastError) + '</span>' : '') + '</td>' +
-          '<td class="hide-sm small">' + esc(r.lastMessage || '') + '<span class="sub">' + time(r.lastAt) + '</span></td><td class="num"><button type="button" class="btn small" data-run="' + esc(r.id) + '">View log</button></td></tr>';
+          '<td class="hide-sm"><code title="' + esc(r.id) + '">' + esc(UI.shortId(r.id)) + '</code></td><td>' + stagePill(r.stage) + '</td><td class="num hide-sm">' + (r.events || 0) + '</td><td>' + prob + (r.lastError ? '<span class="sub" title="' + esc(r.lastError) + '">' + esc(short(r.lastError, 70)) + '</span>' : '') + '</td>' +
+          '<td class="hide-sm small" title="' + esc(r.lastMessage || '') + '">' + esc(short(r.lastMessage || '', 70)) + '<span class="sub">' + time(r.lastAt) + '</span></td><td class="num"><button type="button" class="btn small" data-run="' + esc(r.id) + '">View log</button></td></tr>';
       }).join('') + '</tbody></table></div><p class="muted small pad" style="margin:0">Kept ' + j.keptDays + ' days, also after an alert is cleared. Up to 400 events per run.</p>';
       Array.prototype.forEach.call(el.querySelectorAll('[data-run]'), function (b) { b.addEventListener('click', function () { openRun(b.getAttribute('data-run')); }); });
       var want = UI.qs('run'); if (want) { openRun(want); history.replaceState(null, '', location.pathname); }
