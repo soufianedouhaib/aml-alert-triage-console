@@ -9,6 +9,7 @@
     html += '<section class="card"><h2 style="margin-bottom:6px">Officer review connection</h2><p class="muted small" style="margin-bottom:14px">Point the workflow\'s officer review step at this webhook (an off-platform review task) and send the header below with the value of <code>REVIEW_WEBHOOK_SECRET</code>.</p><dl class="kv">' +
       '<dt>Webhook URL</dt><dd><code>' + esc(s.webhookUrl) + '</code> <button type="button" class="btn small" id="copy">Copy</button></dd>' +
       '<dt>Header name</dt><dd><code>' + esc(s.webhookHeader) + '</code></dd>' +
+      '<dt>No header option?</dt><dd>Use this URL instead: <code>' + esc(s.webhookUrl) + '?key=</code> followed by the value of <code>REVIEW_WEBHOOK_SECRET</code></dd>' +
       '<dt>Decision field</dt><dd><code>' + esc(s.officerResponseVar) + '</code> (Officer Response, text; the field list Opus sends with each review takes priority)</dd>' +
       '<dt>Review window</dt><dd>' + esc(s.reviewTimeoutMinutes) + ' minutes (<code>REVIEW_TIMEOUT_MINUTES</code>; keep it equal to the review step\'s timeout)</dd></dl></section>';
     html += '<section class="card"><h2 style="margin-bottom:14px">Workflow and storage</h2><dl class="kv">' +
