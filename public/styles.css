@@ -574,3 +574,20 @@ pre.presentation { white-space: pre-wrap; margin: 0; font-size: 13px; line-heigh
   .alerts-table th:last-child, .alerts-table td:last-child { padding-right: 12px; width: 44px; }
   .alerts-table .row-act { height: 30px; }
 }
+
+/* Run log viewer (System page) */
+.modal.runlog { max-width: 980px; }
+.rl-events { list-style: none; margin: 0; padding: 0; border-left: 2px solid var(--line); }
+.rl-events li { position: relative; padding: 6px 0 8px 16px; }
+.rl-events li::before { content: ''; position: absolute; left: -6px; top: 13px; width: 10px; height: 10px; border-radius: 50%; background: var(--line); border: 2px solid var(--surface); }
+.rl-events li.rl-error::before { background: var(--bad); }
+.rl-events li.rl-warn::before { background: var(--warn); }
+.rl-events li.rl-info::before { background: var(--ok); }
+.rl-line { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.rl-time { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12.5px; white-space: nowrap; }
+.rl-msg { flex: 1 1 320px; min-width: 0; overflow-wrap: anywhere; }
+.rl-events details { margin-top: 4px; }
+.rl-events summary { cursor: pointer; color: var(--muted); font-size: 12.5px; }
+.rl-events pre { margin: 6px 0 0; padding: 10px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; font-size: 12px; max-height: 260px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.rl-err { color: var(--bad); overflow-wrap: anywhere; }
+.pad { padding: 10px 16px; }

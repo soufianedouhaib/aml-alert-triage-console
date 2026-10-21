@@ -229,7 +229,7 @@
     document.getElementById('subtitle').innerHTML = 'Submitted by ' + esc(c.submittedBy || '—') + ' · ' + UI.fmtDate(c.createdAt) + (c.duplicateOf ? ' <span class="tag">Repeat</span>' : '');
     document.getElementById('head-tools').innerHTML = UI.casePill(c) +
       '<button type="button" class="btn small" id="btn-refresh">' + UI.icon('refresh') + 'Refresh</button>' +
-      (me.role === 'admin' ? '<button type="button" class="btn small danger" id="btn-del">Delete</button>' : '');
+      (me.role === 'admin' ? '<a class="btn small" href="/system.html?run=' + encodeURIComponent(data.case.id) + '#runlogs">Run log</a> <button type="button" class="btn small danger" id="btn-del">Delete</button>' : '');
     var y = window.scrollY;
     document.getElementById('view').innerHTML = '<div class="layout-main-side"><div class="stack">' +
       runningCard() + decisionCard() + outcomeCard() + summaryCard() + findingsCard() + txnCard() + alertCard() + auditCard() +
