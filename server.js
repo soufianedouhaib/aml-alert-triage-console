@@ -205,6 +205,32 @@ async function rowsFor(user, refreshLive) {
 // ---------------------------------------------------------------------------
 const lastPoll = new Map();
 
+// ---------------------------------------------------------------------------
+// Run logs: every step of every run, from submission to the end, kept for the
+// engineering team (admin-only on the System page). Never holds secrets: no
+// service key, no callback token, no webhook secret, header names only.
+// ---------------------------------------------------------------------------
+const RUNLOG_INDEX = 'aml:runlogs';
+const RUNLOG_TTL = 60 * 24 * 3600;
+const RUNLOG_MAX = 400;
+const lastRefreshError = new Map();
+function clip(v, n) { const t = typeof v === 'string' ? v : JSON.stringify(v); return t && t.length > (n || 2000) ? t.slice(0, n || 2000) + '…' : t; }
+async function runlog(id, source, level, message, detail, meta, at) {
+  if (!id) return;
+  try {
+    const ev = { at: at || new Date().toISOString(), source, level, message };
+    if (at) ev.loggedAt = new Date().toISOString();
+    if (detail !== undefined && detail !== null && detail !== '') ev.detail = typeof detail === 'string' ? clip(detail) : JSON.parse(clip(detail, 4000) || 'null') || clip(detail, 4000);
+    await store.push('aml:runlog:' + id, ev, RUNLOG_MAX, RUNLOG_TTL);
+    const idx = (await store.hget(RUNLOG_INDEX, id)) || { id, firstAt: ev.at, events: 0, errors: 0, warnings: 0 };
+    Object.assign(idx, meta || {});
+    idx.lastAt = ev.loggedAt || ev.at; idx.lastMessage = message; idx.events = (idx.events || 0) + 1;
+    if (level === 'error') { idx.errors = (idx.errors || 0) + 1; idx.lastError = message; }
+    if (level === 'warn') idx.warnings = (idx.warnings || 0) + 1;
+    await store.hset(RUNLOG_INDEX, id, idx);
+  } catch (e) { /* logging must never break a run */ }
+}
+
 async function refreshCase(c, force) {
   if (!c || !c.caseId) return c;
   if (TERMINAL.includes(c.opusStatus) && (c.opusStatus !== 'COMPLETED' || c.result)) return c;
@@ -215,6 +241,10 @@ async function refreshCase(c, force) {
     const { json } = await opus('GET', `/case/${encodeURIComponent(c.caseId)}/status`);
     const st = String(json.status || 'UNKNOWN').toUpperCase();
     let changed = st !== c.opusStatus;
+    if (changed) {
+      const bad = ['FAILED', 'CANCELLED', 'TIMED_OUT'].includes(st);
+      await runlog(c.id, 'opus', bad ? 'error' : 'info', `Status ${c.opusStatus || 'PENDING'} → ${st}`, bad ? json : null, { status: st });
+    }
     c.opusStatus = st;
     if (st === 'COMPLETED' && !c.result) {
       const r = await opus('GET', `/case/${encodeURIComponent(c.caseId)}/results`);
@@ -224,13 +254,24 @@ async function refreshCase(c, force) {
         c.result = val && typeof val === 'object' ? val : {};
         c.completedAt = c.completedAt || new Date().toISOString();
         changed = true;
+        const ro = (c.result && c.result.routing) || {};
+        if (c.result && c.result.final_disposition) await runlog(c.id, 'opus', 'info', `Result read: ${c.result.final_disposition} → ${ro.queue || '—'}${ro.sla_hours ? ' (' + ro.sla_hours + ' h SLA)' : ''}`, { final_disposition: c.result.final_disposition, routing: ro, audit_id: c.result.audit_trail && c.result.audit_trail.audit_id });
+        else await runlog(c.id, 'opus', 'error', 'Case completed but the result has no final disposition', out || r.json);
+      } else {
+        await runlog(c.id, 'opus', 'warn', 'Case completed but results were not ready (HTTP ' + r.status + ')');
       }
     }
     if (TERMINAL.includes(st) && !c.finishedAt) { c.finishedAt = new Date().toISOString(); changed = true; }
     c.error = '';
     if (changed) await saveCase(c);
   } catch (e) {
-    if (e.status === 404) { c.opusStatus = 'FAILED'; c.error = 'The case no longer exists on the triage service.'; await saveCase(c); }
+    if (e.status === 404) {
+      c.opusStatus = 'FAILED'; c.error = 'The case no longer exists on the triage service.'; await saveCase(c);
+      await runlog(c.id, 'opus', 'error', 'Status check: the case no longer exists on the triage service (404)', e.body, { status: 'FAILED' });
+    } else if (lastRefreshError.get(c.id) !== e.message) {
+      lastRefreshError.set(c.id, e.message);
+      await runlog(c.id, 'opus', 'warn', 'Status check failed: ' + e.message, e.body);
+    }
   }
   return c;
 }
@@ -253,6 +294,25 @@ async function getEvidence(c) {
     ev = evidence.build(null, c.opusStatus);
     ev.error = e.message;
   }
+  // Log each step once as it finishes, fails or starts waiting.
+  if (ev.nodes && ev.nodes.length) {
+    const seen = c.stepsLogged || {};
+    let changedSteps = false;
+    for (const n of ev.nodes) {
+      const prev = seen[n.id];
+      if (prev === n.status) continue;
+      if (!['COMPLETED', 'FAILED', 'WAITING', 'CANCELLED', 'TIMED_OUT'].includes(n.status)) continue;
+      seen[n.id] = n.status; changedSteps = true;
+      const lvl = n.status === 'FAILED' || n.status === 'CANCELLED' || n.status === 'TIMED_OUT' ? 'error' : 'info';
+      // Timestamped when the step actually ended (or started, while waiting), from the audit log.
+      const endAt = n.startedAt ? new Date(Date.parse(n.startedAt) + (n.status === 'WAITING' ? 0 : (n.ms || 0))).toISOString() : null;
+      await runlog(c.id, 'opus', lvl, `Step ${n.name}: ${n.status === 'WAITING' ? 'waiting for the officer' : n.status}${n.ms != null && n.status !== 'WAITING' ? ' in ' + (n.ms / 1000).toFixed(1) + ' s' : ''}`, n.error ? { error: n.error, startedAt: n.startedAt } : null, null, endAt);
+    }
+    if (changedSteps) { c.stepsLogged = seen; await saveCase(c); }
+  }
+  if (ev.error) {
+    if (lastRefreshError.get('ev:' + c.id) !== ev.error) { lastRefreshError.set('ev:' + c.id, ev.error); await runlog(c.id, 'opus', 'warn', 'Audit log read failed: ' + ev.error); }
+  }
   // Remember headline numbers on the case so lists and reports can show them.
   const nar = ev.data.narrative && typeof ev.data.narrative === 'object' ? ev.data.narrative : null;
   const man = ev.data.manifest && typeof ev.data.manifest === 'object' ? ev.data.manifest : null;
@@ -274,7 +334,8 @@ async function getEvidence(c) {
   return ev;
 }
 
-async function deleteCaseAndReviews(c, reviews) {
+async function deleteCaseAndReviews(c, reviews, who) {
+  await runlog(c.id, 'console', 'warn', `Alert removed from the console${who ? ' by ' + who : ''}; this log is kept`, null, { removed: true });
   await store.hdel(CASES_KEY, c.id);
   await store.del('aml:evidence:' + c.id);
   for (const r of reviews.filter((x) => x.linkedCaseId === c.id)) await store.hdel(REVIEWS_KEY, r.id);
@@ -449,9 +510,20 @@ app.post('/api/alerts', auth.requireRole('analyst', 'admin'), wrap(async (req, r
   }
 
   const cust = String(alert.narrative || '').match(/\b(CUS-\d{3,})\b/);
-  const created = await opus('POST', '/case', { workflowId: WORKFLOW_ID, title: `AML alert ${alert.alert_id}`, description: `${alert.rule_code} · ${alert.subject_account}` });
+  const meta = { alertId: alert.alert_id, submittedBy: req.user.name, rule: alert.rule_code };
+  let created;
+  try {
+    created = await opus('POST', '/case', { workflowId: WORKFLOW_ID, title: `AML alert ${alert.alert_id}`, description: `${alert.rule_code} · ${alert.subject_account}` });
+  } catch (e) {
+    const sid = 'submit-' + Date.now();
+    await runlog(sid, 'console', 'info', `Alert ${alert.alert_id} submitted by ${req.user.name}`, { rule: alert.rule_code, account: alert.subject_account, workflowId: WORKFLOW_ID }, Object.assign({ status: 'NOT_STARTED' }, meta));
+    await runlog(sid, 'opus', 'error', 'Create case failed: ' + e.message, e.body);
+    throw e;
+  }
   const caseId = created.json.caseId || created.json.id;
   if (!caseId) throw new UpstreamError(502, 'The triage service did not return a case id.');
+  await runlog(caseId, 'console', 'info', `Alert ${alert.alert_id} submitted by ${req.user.name}`, { rule: alert.rule_code, account: alert.subject_account, score: alert.score, flagged: alert.flagged_txns, workflowId: WORKFLOW_ID }, Object.assign({ status: 'PENDING' }, meta));
+  await runlog(caseId, 'opus', 'info', 'Case created', { caseId });
 
   // Send the alert with the type the workflow declares for its input
   // (json_string). Sent as plain "str" the input step fails at once.
@@ -460,12 +532,17 @@ app.post('/api/alerts', auth.requireRole('analyst', 'admin'), wrap(async (req, r
   if (spec.typeDefinition) payload[INPUT_VAR].typeDefinition = spec.typeDefinition;
   try {
     await opus('POST', `/case/${encodeURIComponent(caseId)}/execute`, { payload });
+    await runlog(caseId, 'opus', 'info', `Execution started (input ${INPUT_VAR} sent as ${spec.type}${spec.fromWorkflow ? ', read from the workflow' : ', default'})`);
   } catch (e) {
     if ((e.status === 400 || e.status === 422) && payload[INPUT_VAR].type !== 'str') {
+      await runlog(caseId, 'opus', 'warn', `Execute refused with ${spec.type} (${e.status}); retrying with str`, e.body);
       payload[INPUT_VAR].type = 'str';
       delete payload[INPUT_VAR].typeDefinition;
-      await opus('POST', `/case/${encodeURIComponent(caseId)}/execute`, { payload });
-    } else throw e;
+      try {
+        await opus('POST', `/case/${encodeURIComponent(caseId)}/execute`, { payload });
+        await runlog(caseId, 'opus', 'info', 'Execution started (input sent as str)');
+      } catch (e2) { await runlog(caseId, 'opus', 'error', 'Execute failed: ' + e2.message, e2.body, { status: 'FAILED' }); throw e2; }
+    } else { await runlog(caseId, 'opus', 'error', 'Execute failed: ' + e.message, e.body, { status: 'FAILED' }); throw e; }
   }
 
   const c = {
@@ -504,7 +581,7 @@ app.post('/api/cases/clear', adminOnly, wrap(async (req, res) => {
   const running = (c) => !TERMINAL.includes(c.opusStatus);
   const unfinished = (c) => !running(c) && (c.opusStatus !== 'COMPLETED' || !(c.result && c.result.final_disposition));
   const drop = cases.filter((c) => !running(c) && (mode === 'all' || unfinished(c)));
-  for (const c of drop) await deleteCaseAndReviews(c, reviews);
+  for (const c of drop) await deleteCaseAndReviews(c, reviews, req.user.name);
   res.json({ mode, cleared: drop.length, kept: cases.length - drop.length, running: cases.filter(running).length });
 }));
 
@@ -566,7 +643,7 @@ app.post('/api/cases/:id/refresh', anyUser, wrap(async (req, res) => {
 app.delete('/api/cases/:id', adminOnly, wrap(async (req, res) => {
   const c = await getCase(req.params.id);
   if (!c) return res.status(404).json({ error: 'Case not found.' });
-  await deleteCaseAndReviews(c, await allReviews());
+  await deleteCaseAndReviews(c, await allReviews(), req.user.name);
   res.json({ ok: true });
 }));
 
@@ -707,7 +784,7 @@ app.post('/api/reviews/:id/decision', officerOrAdmin, wrap(async (req, res) => {
   if (!r || r.deleted) return res.status(404).json({ error: 'Review not found.' });
   const state = reviewState(r);
   if (state === 'DECIDED') return res.status(409).json({ error: 'This review was already decided by ' + ((r.decision && r.decision.byName) || 'another officer') + '.' });
-  if (state === 'EXPIRED') return res.status(410).json({ error: 'The review window for this alert has closed, so the decision can no longer be recorded. The case has timed out on the triage service.' });
+  if (state === 'EXPIRED') { await runlog(r.linkedCaseId || r.executionId, 'officer', 'error', `${req.user.name} tried to decide after the review window closed`); return res.status(410).json({ error: 'The review window for this alert has closed, so the decision can no longer be recorded. The case has timed out on the triage service.' }); }
   if (r.status === 'SUBMITTING' && r.lockedAt && Date.now() - Date.parse(r.lockedAt) < 30000) return res.status(409).json({ error: 'Another officer is submitting a decision for this alert right now.' });
   const linked = r.linkedCaseId ? await getCase(r.linkedCaseId) : null;
   if (linked && linked.submittedBy === req.user.email) return res.status(409).json({ error: 'You submitted this alert, so another officer must decide it.' });
@@ -736,14 +813,17 @@ app.post('/api/reviews/:id/decision', officerOrAdmin, wrap(async (req, res) => {
   try {
     const headers = { 'Content-Type': 'application/json' };
     headers[r.callback.header || 'x-callback-token'] = r.callback.token;
+    await runlog(r.linkedCaseId || r.executionId, 'officer', 'info', `Decision by ${req.user.name} (${officerId || 'no officer ID'}): ${responseText}`, { outputFields: Object.keys(outputData) });
     resp = await fetch(r.callback.url, { method: 'POST', headers, body: JSON.stringify({ output_data: outputData, status: 'success' }) });
     respText = await resp.text();
   } catch (e) {
     r.status = 'PENDING'; r.error = 'Could not reach the triage service. Try again.';
+    await runlog(r.linkedCaseId || r.executionId, 'opus', 'error', 'Decision callback could not reach Opus: ' + e.message);
     await saveReview(r);
     return res.status(502).json({ error: r.error });
   }
 
+  await runlog(r.linkedCaseId || r.executionId, 'opus', resp.status >= 200 && resp.status < 300 ? 'info' : 'error', `Decision callback answered ${resp.status}${resp.status >= 200 && resp.status < 300 ? ' — the workflow resumes' : ''}`, resp.status >= 300 ? clip(respText, 1500) : null);
   if (resp.status >= 200 && resp.status < 300) {
     r.status = 'DECIDED';
     r.error = '';
@@ -774,6 +854,12 @@ async function logHook(req, status, reason, body) {
       headers: Object.keys(req.headers || {}).filter((h) => !/^(x-vercel|x-forwarded|x-real-ip|forwarded|cookie|authorization)/.test(h)).sort(),
       executionId: String(b.execution_id || ''), bodyKeys: b && typeof b === 'object' ? Object.keys(b).slice(0, 12) : [] });
     await store.set('aml:webhook-log', list.slice(0, 10));
+    if (b.execution_id) {
+      const ok = status >= 200 && status < 300;
+      await runlog(String(b.execution_id), 'webhook', ok ? 'info' : 'error',
+        ok ? 'Officer review packet received from Opus: ' + reason : `Officer review hand-over refused (${status}): ${reason}`,
+        { headers: Object.keys(req.headers || {}).filter((h) => !/^(x-vercel|x-forwarded|x-real-ip|forwarded|cookie|authorization)/.test(h)).sort(), bodyKeys: Object.keys(b).slice(0, 12) });
+    }
   } catch (e) { }
 }
 
@@ -822,6 +908,8 @@ app.post('/api/review-webhook', wrap(async (req, res) => {
   if (!c && alertId) c = cases.find((x) => x.alertId === alertId);
   if (c) {
     r.linkedCaseId = c.id;
+    await runlog(c.id, 'webhook', 'info', `Review linked to the alert; officer window ${REVIEW_TIMEOUT_MIN} min, closes ${r.deadline}`,
+      { reviewId: id, recommended: manifest && manifest.case_header && manifest.case_header.recommended_disposition, riskScore: manifest && manifest.case_header && manifest.case_header.risk_score, expectedOutputs: Object.keys(r.expected || {}) }, { status: 'WAITING' });
     c.opusStatus = TERMINAL.includes(c.opusStatus) ? c.opusStatus : 'WAITING';
     if (manifest && manifest.case_header) {
       if (DISPOSITIONS.includes(manifest.case_header.recommended_disposition)) c.recommended = manifest.case_header.recommended_disposition;
@@ -830,8 +918,38 @@ app.post('/api/review-webhook', wrap(async (req, res) => {
     if (manifest && manifest.customer_name) c.customerName = manifest.customer_name;
     await saveCase(c);
   }
+  if (!c) await runlog(r.executionId || ('review-' + id), 'webhook', 'warn', `Review packet for ${alertId || 'an unknown alert'} did not match any alert submitted from this console`, { reviewId: id, executionId: r.executionId });
   await saveReview(r);
   res.json({ ok: true, id });
+}));
+
+// --- run logs (admin) ------------------------------------------------------
+app.get('/api/runlogs', adminOnly, wrap(async (req, res) => {
+  const idx = await store.hgetall(RUNLOG_INDEX);
+  const cases = await store.hgetall(CASES_KEY);
+  const list = Object.values(idx).map((x) => {
+    const c = cases[x.id];
+    return Object.assign({}, x, c ? { stage: toRow(c, null).stage, alertId: x.alertId || c.alertId, customerName: c.customerName || '' } : { stage: x.removed ? 'REMOVED' : (x.status || '') });
+  }).sort((a, b) => String(b.firstAt).localeCompare(String(a.firstAt))).slice(0, 200);
+  res.json({ runs: list, keptDays: RUNLOG_TTL / 86400 });
+}));
+
+app.get('/api/runlogs/:id', adminOnly, wrap(async (req, res) => {
+  const id = String(req.params.id);
+  const meta = await store.hget(RUNLOG_INDEX, id);
+  const events = await store.list('aml:runlog:' + id);
+  if (!meta && !events.length) return res.status(404).json({ error: 'No log for this run.' });
+  const c = await getCase(id);
+  let steps = [];
+  let caseInfo = null;
+  if (c) {
+    await refreshCase(c, true);
+    const ev = await getEvidence(c);
+    steps = ev.nodes || [];
+    const row = toRow(c, reviewForCase(c, await allReviews()));
+    caseInfo = { id: c.id, caseId: c.caseId, alertId: c.alertId, stage: row.stage, opusStatus: c.opusStatus, createdAt: c.createdAt, finishedAt: c.finishedAt || null, error: c.error || '', finalDisposition: row.finalDisposition, queue: row.queue };
+  }
+  res.json({ id, workflowId: WORKFLOW_ID, meta: meta || null, case: caseInfo, steps, events });
 }));
 
 // --- admin system view ------------------------------------------------------
