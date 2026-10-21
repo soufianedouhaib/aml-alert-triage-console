@@ -81,6 +81,9 @@
         btn.addEventListener('click', function () {
           var a = JSON.parse(JSON.stringify(samples[Number(btn.getAttribute('data-i'))].alert));
           a.alert_id = newAlertId();
+          // Examples are stamped with the moment they are loaded, so the alert
+          // and the reports show today's date rather than the fixture's.
+          a.generated_at = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
           fill(a); showErr('');
           Array.prototype.forEach.call(document.querySelectorAll('.sample'), function (s) { s.classList.toggle('active', s === btn); });
           form.note.value = samples[Number(btn.getAttribute('data-i'))].title;
