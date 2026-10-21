@@ -19,7 +19,7 @@ const INPUT_VAR = 'workflow_input_806ktowl2';            // TM Alert (JSON strin
 const INPUT_DISPLAY = 'TM Alert';
 const OUTPUT_VAR = 'workflow_output_bj5nkid7u';          // Final Disposition & Audit Trail (object)
 const OFFICER_RESPONSE_VAR = process.env.OFFICER_RESPONSE_VAR || 'workflow_output_bhnpsw89f'; // Officer Response (str); only used when the packet carries no schema
-const REVIEW_TIMEOUT_MIN = Number(process.env.REVIEW_TIMEOUT_MINUTES || 10);
+const REVIEW_TIMEOUT_MIN = Number(process.env.REVIEW_TIMEOUT_MINUTES || 60);
 const WEBHOOK_HEADER = String(process.env.REVIEW_WEBHOOK_HEADER || 'x-webhook-secret').toLowerCase();
 
 const PRODUCT = {
@@ -35,7 +35,6 @@ const REVIEWS_KEY = 'aml:reviews';
 const TERMINAL = ['COMPLETED', 'FAILED', 'CANCELLED', 'TIMED_OUT'];
 const DISPOSITIONS = ['ESCALATE', 'REFER', 'CLOSE'];
 const ACTIONS = ['CONFIRM', 'OVERRIDE', 'ANNOTATE'];
-const KEEP_ON_CLEAR = 3;
 
 function serviceKey() { return process.env.OPUS_SERVICE_KEY || process.env.OPUS_API_KEY || ''; }
 
@@ -373,7 +372,7 @@ app.get('/api/me', (req, res) => {
 });
 
 app.post('/api/me/password', anyUser, wrap(async (req, res) => {
-  if (req.user.kind === 'demo') return res.status(400).json({ error: 'Demo accounts have no password. Ask an admin to add you as a user to get one.' });
+  if (req.user.kind === 'demo') return res.status(400).json({ error: 'This account signs in from the account list on the sign-in page, so it has no password. Ask an admin to add you as a user to get one.' });
   const { current, next } = req.body || {};
   if (!auth.checkPassword(current || '', req.user)) return res.status(400).json({ error: 'Your current password is not correct.' });
   if (!next || String(next).length < 10) return res.status(400).json({ error: 'The new password needs at least 10 characters.' });
@@ -394,7 +393,7 @@ app.post('/api/users', adminOnly, wrap(async (req, res) => {
   const email = auth.normEmail(b.email);
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Enter a valid email address.' });
   if (!auth.ROLES.includes(b.role)) return res.status(400).json({ error: 'Pick a role.' });
-  if (auth.demoAccounts().some((d) => d.email === email)) return res.status(400).json({ error: 'That email belongs to a demo account on the sign-in page. Use another address.' });
+  if (auth.demoAccounts().some((d) => d.email === email)) return res.status(400).json({ error: 'That email belongs to an account on the sign-in list. Use another address.' });
   let u = await auth.getUser(email);
   const isNew = !u || b.isNew;
   if (b.isNew && u) return res.status(409).json({ error: 'A user with that email already exists.' });
@@ -499,9 +498,14 @@ app.get('/api/cases', anyUser, wrap(async (req, res) => {
 app.post('/api/cases/clear', adminOnly, wrap(async (req, res) => {
   const cases = await allCases();
   const reviews = await allReviews();
-  const drop = cases.slice(KEEP_ON_CLEAR);
+  // mode 'unfinished': only alerts that stopped without a disposition.
+  // mode 'all': every alert. Alerts still being investigated are always kept.
+  const mode = req.body && req.body.mode === 'all' ? 'all' : 'unfinished';
+  const running = (c) => !TERMINAL.includes(c.opusStatus);
+  const unfinished = (c) => !running(c) && (c.opusStatus !== 'COMPLETED' || !(c.result && c.result.final_disposition));
+  const drop = cases.filter((c) => !running(c) && (mode === 'all' || unfinished(c)));
   for (const c of drop) await deleteCaseAndReviews(c, reviews);
-  res.json({ cleared: drop.length, kept: Math.min(cases.length, KEEP_ON_CLEAR) });
+  res.json({ mode, cleared: drop.length, kept: cases.length - drop.length, running: cases.filter(running).length });
 }));
 
 async function caseForReq(req, res) {
@@ -861,6 +865,8 @@ app.get('/api/system', adminOnly, wrap(async (req, res) => {
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found.' }));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'] }));
+// Unknown page: a proper page with the console's menu instead of "Cannot GET".
+app.use((req, res) => res.status(404).sendFile(path.join(__dirname, 'public', '404.html')));
 
 module.exports = app;
 
