@@ -11,12 +11,12 @@
       '<dt>Header name</dt><dd><code>' + esc(s.webhookHeader) + '</code></dd>' +
       '<dt>No header option?</dt><dd>Use this URL instead: <code>' + esc(s.webhookUrl) + '?key=</code> followed by the value of <code>REVIEW_WEBHOOK_SECRET</code></dd>' +
       '<dt>Decision field</dt><dd><code>' + esc(s.officerResponseVar) + '</code> (Officer Response, text; the field list Opus sends with each review takes priority)</dd>' +
-      '<dt>Review window</dt><dd>' + esc(s.reviewTimeoutMinutes) + ' minutes (<code>REVIEW_TIMEOUT_MINUTES</code>; keep it equal to the review step\'s timeout)</dd></dl></section>';
+      '<dt>Review window</dt><dd>' + esc(s.reviewTimeoutMinutes) + ' minutes (keep it equal to the review step\'s timeout in the workflow)</dd></dl></section>';
     html += '<section class="card"><h2 style="margin-bottom:14px">Workflow and storage</h2><dl class="kv">' +
       '<dt>Workflow ID</dt><dd><code>' + esc(s.workflowId) + '</code></dd><dt>API base</dt><dd><code>' + esc(s.apiBase) + '</code></dd>' +
       '<dt>Input variable</dt><dd><code>' + esc(s.inputVar) + '</code> sent as <code>' + esc(s.inputType) + '</code>' + (s.inputTypeFromWorkflow ? ' (read from the workflow)' : ' (default; the workflow could not be read)') + '</dd><dt>Output variable</dt><dd><code>' + esc(s.outputVar) + '</code></dd>' +
       '<dt>Storage</dt><dd>' + esc(s.storage === 'memory' ? 'Not configured (temporary memory)' : 'Redis (' + s.storage + ')') + '</dd>' +
-      '<dt>Sign-in</dt><dd>' + (s.demo ? 'Account list on the sign-in page (<code>DEMO_MODE</code>)' : 'Email and password only') + '</dd>' +
+      '<dt>Sign-in</dt><dd>' + (s.demo ? 'Pick an account from the list on the sign-in page; added users also enter a password' : 'Email and password for everyone') + '</dd>' +
       '<dt>Support email</dt><dd>' + esc(s.supportEmail || 'not set') + '</dd>' +
       '<dt>Records</dt><dd>' + s.counts.cases + ' alerts · ' + s.counts.reviews + ' reviews</dd></dl></section>';
     html += '<section class="card flush"><div class="card-head pad"><div><h2>Reviews not linked to an alert</h2><p>Packets for alerts that were not submitted from this console.</p></div></div>' +
@@ -42,6 +42,7 @@
   var STAGE = { QUEUED: ['info', 'Queued'], PENDING: ['info', 'Queued'], RUNNING: ['info', 'Investigating'], IN_PROGRESS: ['info', 'Investigating'], AWAITING_REVIEW: ['warn', 'Awaiting officer'], WAITING: ['warn', 'Awaiting officer'],
     FINALISING: ['info', 'Routing decision'], COMPLETED: ['ok', 'Completed'], COMPLETED_NO_RESULT: ['bad', 'No result'], FAILED: ['bad', 'Did not finish'], TIMED_OUT: ['bad', 'Timed out'],
     CANCELLED: ['', 'Cancelled'], NOT_STARTED: ['bad', 'Not started'], REMOVED: ['', 'Removed'] };
+  function maskId(t) { t = String(t || ''); return t.length <= 10 ? t : t.slice(0, 4) + '••••' + t.slice(-4); }
   function short(t, n) { t = String(t || ''); return t.length > n ? t.slice(0, n - 1) + '…' : t; }
   function stagePill(st) { var x = STAGE[st] || ['', st || '—']; return UI.pill(x[0], x[1]); }
   function time(iso) { if (!iso) return '—'; var d = new Date(iso); return isNaN(d) ? esc(iso) : d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }); }
@@ -72,7 +73,7 @@
       var head = '<dl class="kv" style="margin-bottom:14px">' +
         '<dt>Alert</dt><dd>' + esc((c && c.alertId) || (d.meta && d.meta.alertId) || '—') + (c ? ' · <a href="/case.html?id=' + encodeURIComponent(c.id) + '">open alert</a>' : ' <span class="muted">(alert removed from the console)</span>') + '</dd>' +
         '<dt>Status</dt><dd>' + stagePill(c ? c.stage : (d.meta && (d.meta.removed ? 'REMOVED' : d.meta.status))) + (c && c.error ? ' <span class="muted">' + esc(c.error) + '</span>' : '') + '</dd>' +
-        '<dt>Workflow</dt><dd><code>' + esc(d.workflowId) + '</code></dd>' +
+        '<dt>Workflow</dt><dd><code>' + esc(maskId(d.workflowId)) + '</code> <span class="muted small">(in full in the downloaded JSON)</span></dd>' +
         '<dt>Case ID</dt><dd><code>' + esc(id) + '</code></dd>' +
         (c && c.finalDisposition ? '<dt>Outcome</dt><dd>' + esc(c.finalDisposition + ' → ' + (c.queue || '—')) + '</dd>' : '') + '</dl>';
       var steps = (d.steps || []).length ? '<h3 style="margin:6px 0 8px">Workflow steps (from the Opus audit log)</h3><div class="table-wrap"><table class="rl-steps"><thead><tr><th>Step</th><th>Status</th><th>Started</th><th class="num">Took</th></tr></thead><tbody>' +
