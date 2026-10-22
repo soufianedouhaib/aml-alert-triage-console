@@ -953,6 +953,18 @@ app.get('/api/runlogs/:id', adminOnly, wrap(async (req, res) => {
 }));
 
 // --- admin system view ------------------------------------------------------
+// Identifiers are masked on screen; the full values live in the deployment
+// settings and the internal docs, not on a page that gets shown to clients.
+function maskId(v) {
+  const t = String(v || '');
+  if (!t) return '';
+  const m = t.match(/^(workflow_(?:input|output)_)(.+)$/);
+  if (m) return m[1] + m[2].slice(0, 2) + '••••' + m[2].slice(-2);
+  return t.length <= 10 ? t.slice(0, 2) + '••••' : t.slice(0, 4) + '••••' + t.slice(-4);
+}
+function maskUrl(v) {
+  try { const u = new URL(String(v)); return u.protocol + '//' + u.host.slice(0, 3) + '•••••' + (u.pathname.match(/\/[^/]*$/) || [''])[0]; } catch (e) { return maskId(v); }
+}
 app.get('/api/system', adminOnly, wrap(async (req, res) => {
   const host = req.headers['x-forwarded-host'] || req.headers.host || '';
   const proto = req.headers['x-forwarded-proto'] || 'https';
@@ -962,11 +974,11 @@ app.get('/api/system', adminOnly, wrap(async (req, res) => {
     missing: missingEnv(),
     storage: store.mode(),
     demo: auth.demoEnabled(),
-    workflowId: WORKFLOW_ID,
-    apiBase: API_BASE,
-    inputVar: INPUT_VAR,
-    outputVar: OUTPUT_VAR,
-    officerResponseVar: OFFICER_RESPONSE_VAR,
+    workflowId: maskId(WORKFLOW_ID),
+    apiBase: maskUrl(API_BASE),
+    inputVar: maskId(INPUT_VAR),
+    outputVar: maskId(OUTPUT_VAR),
+    officerResponseVar: maskId(OFFICER_RESPONSE_VAR),
     webhookUrl: host ? `${proto}://${host}/api/review-webhook` : '/api/review-webhook',
     webhookHeader: WEBHOOK_HEADER,
     reviewTimeoutMinutes: REVIEW_TIMEOUT_MIN,
